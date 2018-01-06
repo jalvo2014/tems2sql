@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.28000;
+$gVersion = 1.29000;
 
 
 # no CPAN packages used
@@ -58,6 +58,7 @@ my $opt_future;             # monitor for LSTDATE beyond given time
 my $opt_future_date;        # When 1, a future date was found
 my $opt_future_date_count = 0; #count of future dates
 my $opt_ix;              # output only index records
+my $opt_ref;             # output reference lines
 my $opt_qib;             # include QIB Columns
 my $opt_sct;             # count of show keys collected
 my @opt_skey;            # show keys
@@ -71,6 +72,7 @@ my $opt_val_nickname = "";    # validation nickname
 my @opt_tc = ();         # set text columns to null
 my @opt_tlim;            # txt output column display limit, 0 means all, default 256.
 my $opt_test;
+my $opt_showone;
 my $opt_fav;
 my $opt_gal = "gal";     # Assume Global Access List level
 my %hQA1names;
@@ -80,6 +82,11 @@ my $DEBUG = "YES";
 my $opt_o;               # when defined, set output controls
 my $opt_ofn;             # output filename
 my $opt_z = 0;      # identify zOS reproed VSAM files
+my $opt_skip = 0;
+my %opt_skipx = ();
+my $opt_varyrec = 0;    # varying record size in z/OS
+my $debug_now = 0;
+my $curr_lstdate;
 
 %hQA1names = (
 TNODELST => 'QA1CNODL,LSTDATE,NODE,NODELIST,NODETYPE',
@@ -180,6 +187,10 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_ix = 1;
    }
+   elsif ($ARGV[0] eq "-ref") {
+      shift(@ARGV);
+      $opt_ref = 1;
+   }
    elsif ($ARGV[0] eq "-qib") {
       shift(@ARGV);
       $opt_qib = 1;
@@ -187,6 +198,7 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-s") {
       shift(@ARGV);
       $opt_test = shift(@ARGV);
+      $opt_showone = $opt_test if !defined $opt_showone;
       die "option -s with no following column name\n" if !defined $opt_test;
       push(@opt_skey,$opt_test);
    }
@@ -250,6 +262,19 @@ while (@ARGV) {
       $opt_tlim = shift(@ARGV);
       die "option -tlim with no following number\n" if !defined $opt_tlim;
    }
+   elsif ($ARGV[0] eq "-varyrec") {
+      shift(@ARGV);
+      $opt_varyrec = 1;
+   }
+   elsif ($ARGV[0] eq "-skip") {
+      shift(@ARGV);
+      $opt_skip = 1;
+      my $skip_from = shift(@ARGV);
+      die "option -skip without two following numbers\n" if !defined $skip_from;
+      my $skip_to = shift(@ARGV);
+      die "option -skip without two following numbers\n" if !defined $skip_to;
+      $opt_skipx{$skip_from} = $skip_to;
+   }
    elsif ($ARGV[0] eq "-o") {           # -o filename, set output
       $opt_o = "";                      # -o calculate output name based on function
       shift(@ARGV);                     # otherwise send to STDOUT
@@ -281,6 +306,7 @@ if (!defined $opt_v) {$opt_v=0;}                            # TSV output
 if (!defined $opt_e) {$opt_e=0;}                            # show deleted flag
 if (!defined $opt_ee) {$opt_ee=0;}                          # show only deleted flag
 if (!defined $opt_ix) {$opt_ix=0;}                          # output only index records
+if (!defined $opt_ref) {$opt_ref=0;}                        # output reference lines
 if (!defined $opt_qib) {$opt_qib=0;}                        # include QIB Columns
 if (!@opt_skey) {@opt_skey=();}                             # show keys
 if (!defined $opt_sx) {$opt_sx="";}                         # show key exclude file
@@ -330,8 +356,12 @@ if ($opt_ix != 0  && $#opt_skey == -1) {
    die("Index only output -ix specified but -s is required and not specified\n");
 }
 
-if ($opt_l + $opt_v + $opt_txt + $opt_ix +$opt_val > 1) {
-   die("Options -l and -v  and -txt and -ix and -val are mutually exclusive\n");
+if ($opt_ref != 0  && $#opt_skey == -1) {
+   die("Reference output -ref specified but -s is required and not specified\n");
+}
+
+if ($opt_l + $opt_v + $opt_txt + $opt_ix + $opt_val + $opt_ref > 1) {
+   die("Options -l and -v  and -txt and -ix and -val and -ref are mutually exclusive\n");
 }
 
 
@@ -400,6 +430,7 @@ if (defined $opt_o) {
    } else {
       if ($opt_ix) { $opt_ofn = $tablefn . "\.DB\.ix" }
       elsif ($opt_l) { $opt_ofn = $tablefn . "\.DB\.lst" }
+      elsif ($opt_ref) { $opt_ofn = $tablefn . "\.DB\.ref" }
       elsif ($opt_txt) { $opt_ofn = $tablefn . "\.DB\.txt" }
       elsif ($opt_val) { $opt_ofn = $tablefn . "\.DB\.val" }
       elsif ($opt_v) { $opt_ofn = $tablefn . "\.DB\.csv" }
@@ -505,6 +536,7 @@ foreach $oneline (@kib_data)
       $col[$coli] = $colname;
       $colx{$colname} = $coli;
       $coldtyp[$coli] = $dtype;
+
       $colutf8[$coli] = 0;
       if (substr($dtype,0,3) eq 'F8U' || substr($dtype,0,3) eq 'V8U') {$colutf8[$coli] = 1;}
       $dtypx{$dtype} = '' if !defined($dtypx{$dtype});
@@ -589,6 +621,7 @@ my $catsize = 0;
 my $highpos = -1;
 
 for ($i = 0; $i <= $coli; $i++) {
+#   printf STDERR "$col[$i] $colpos[$i] $collen[$i]\n";   # debug
    next if $colpos[$i] < $highpos;
    $highpos = $colpos[$i];
    $highlen = $collen[$i];
@@ -629,6 +662,7 @@ my $fcount = 0;     # count of field definitions
 my $fields;
 my $qa_endian = 0;  # remember endian type \ 1=little 0=big
 my $recpos = 0;                                        # pointer to file position
+my $crecpos = 0;                                       # pointer to current record file position
 my $relrec = 0;     # handle relrec cases
 
 $qa1size = -s  $qa1fn;                                 # file size in bytes
@@ -649,7 +683,7 @@ die "unexpected size difference" if $num != 2;
 $test2 = unpack("n",$buffer);
 
 if ($opt_z == 1) {
-   $qa_endian = 1;
+   $qa_endian = 0;
 } else {
    $qa_endian = 1 if $test2 == 0;
 }
@@ -720,10 +754,12 @@ else {
 
    $recpos = $hdrsize+8;                                 # position of first record
 }
+# printf STDERR "record size $recsize\n";  # debug
 
 $l = 0;               # track progress through data dump - helps debugging
 $cnt = 0;             # count of output SQL statements
 my $cpydata;          # column data
+my $cpydata_raw;      # raw column data
 my $lpre;             # output listing prefix
 my $del;              # deletion flag
 my $s;
@@ -814,15 +850,88 @@ elsif ($opt_val == 1) {
 }
 
 TOP: while ($recpos < $qa1size) {
+#$DB::single=2 if $recpos >= 132328;
    seek(QA,$recpos,0);                                 # position file for reading
+   $crecpos = $recpos;                                 # current record file position
+   $curr_lstdate = "";
    if ($opt_z == 1) {
       $del = 0;                                        # no detection of deleted records in zOS
+      seek(QA,$recpos,0);                              # position file for reading
       $num = read(QA,$buffer,4,0);                     # read 2 bytes
       die "unexpected size difference" if $num != 4;
       $eof = unpack("N",$buffer);
       last if $eof == 4294967295;                      # eof key
+      seek(QA,$recpos,0);                                 # re-position file for reading
+      $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
+      die "unexpected size difference" if $num != $recsize;
+      my $next_recsize = $recsize;
+
+      # One zOS case had varying record lengths, with the excess padded with ASCII blanks
+      # Adapt to that using some heuristics. That is needed because the raw data does not
+      # contain any lengths.
+      if ($opt_varyrec == 1)  {
+         my $k;
+         my $cp;
+         my $gotlen = 0;
+         if ($tablename eq "TSITDESC") {
+
+            # case 1 - TSITDESC record was 2092 bytes long instead of 3994. Look ahead at the LOCFLAG.
+            #          That will normally be blank or null... unless it points into the next records
+            $cp = $recpos + 2096;                        # position at LOCFLAG
+            seek(QA,$cp,0);                              # re-position file for reading
+            $num = read(QA,$buffer,1,0);                 # read data record
+            my $char_ord = ord(substr($buffer,0,1));
+            if (($char_ord != 64) && ($char_ord != 0)) {
+               $debug_now = 1;
+               $k = 2092-3994;
+               $gotlen = 1;
+            }
+
+            # case 2 - For the 3842, look beyond end of record into the first byte of the
+            #          LSTDATE field in the next records. 241 = X'F1' = EBCDIC number 1.
+            #          That detects that case.
+            $cp = $recpos + 3482 + 283;
+            seek(QA,$cp,0);                              # re-position file for reading
+            $num = read(QA,$buffer,1,0);                 # read data record
+            $char_ord = ord(substr($buffer,0,1));
+            if (($char_ord == 241)) {
+               $debug_now = 1;
+               $k = 3482-3994;
+               $gotlen = 1;
+            }
+         }
+         if ($tablename eq "TOBJACCL") {
+            # case 3 - For the 120 byte TOBJACCL record, look at the INFO record.
+            #          That detects that case.
+            $cp = $recpos + 120;                         # INFO
+            seek(QA,$cp,0);                              # re-position file for reading
+            $num = read(QA,$buffer,1,0);                 # read data record
+            my $char_ord = ord(substr($buffer,0,1));
+            if (($char_ord != 64) && ($char_ord != 0)) {
+               $debug_now = 1;
+               $k = 120-476;
+               $gotlen = 1;
+            }
+         }
+         # case 4 - If not detected yet, look for trailing ascii blanks and continue
+         #          until that runs out.
+         if ($gotlen != 1) {
+            for ($k=0; $k<4096; $k++) {
+               $cp = $recpos + $k;
+               seek(QA,$cp,0);                           # re-position file for reading
+               $num = read(QA,$buffer,1,0);                 # read data record
+               if (ord(substr($buffer,0,1)) == 32) {
+                  $debug_now = 1;
+                  next;
+               }
+               last;
+#           last if ord(substr($buffer,0,1)) != 32;
+            }
+         }
+         $next_recsize = $recsize + $k;
+      }
       seek(QA,$recpos,0);                              # re-position file for reading
-      $recpos += $recsize;                             # calculate position of next record
+      $recpos += $next_recsize;                          # calculate position of next record
    }
    else {
       if ($qa_endian == 0) {                              # big_endian
@@ -839,6 +948,9 @@ TOP: while ($recpos < $qa1size) {
       }
       $recpos += 2;
       seek(QA,$recpos,0);                                 # re-position file for reading
+      $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
+      die "unexpected size difference" if $num != $recsize;
+      seek(QA,$recpos,0);                                 # re-position file for reading
       $recpos += $recsize;                                # calculate position of next record
       if ($del == 0) {                                    # deleted record
          next TOP if $opt_ee == 1;                        # only deleted records wanted
@@ -847,8 +959,15 @@ TOP: while ($recpos < $qa1size) {
          next TOP if $opt_e == 0;
       }
    }
-   $num = read(QA,$buffer,$recsize,0);                 # read data record
 
+
+   if ($opt_skip == 1) {                                  # if a skip point, change $recpos to the skip_to point
+      my $sk = $opt_skipx{$recpos};
+      $recpos = $sk if defined $sk;
+   }
+
+   seek(QA,$crecpos,0);                                 # re-position file for reading
+   $num = read(QA,$buffer,$recsize,0);                  # read data record
    die "unexpected size difference - expected $recsize got $num l=$l $recpos" if $num != $recsize;
    # record is now in $buffer
 
@@ -858,7 +977,7 @@ TOP: while ($recpos < $qa1size) {
    $opt_sct = -1;
    $insql = "";
 
-   if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 && $opt_val == 0 ) {
+   if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 && $opt_val == 0 && $opt_ref == 0) {
       # data record found. Generate insert SQL which has this form:
       # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
@@ -889,7 +1008,10 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
       $clen = $collen[$i];                       # length of data
-
+      if ($col[$i] eq "LSTDATE") {
+         $curr_lstdate = substr($buffer,$dpos, $clen);   # save LSTDATE if found
+         eval '$curr_lstdate =~ tr/\000-\377/' . $ccsid1047 . '/' if $opt_z == 1;
+      }
       if ($coldtyp[$i] eq "O4I2") {              # Short Integer
          if ($qa_endian == 0) {                  # big_endian size
             $cpydata = unpack("n",substr($buffer,$dpos,2));
@@ -920,10 +1042,18 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          $cpydata =~ s/(\x00+$)//g;                 # remove trailing binary zeroes
 
          # Some z/OS columns are not in ASCII. For those ones convert to ascii
+         # at least one site had an ADVISE column that was in EBCDIC from pre IBM times
+         # Identify that case and translate anyway.
 
-         if ($opt_z == 1 && $colutf8[$i] == 0 ) {
-            $cpydata =~ s/(\x40+$)//g;                 # remove trailing ebcdic blanks
-            eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/';
+         if ($opt_z == 1) {
+            my $translate = 0;
+            $translate = 1 if $colutf8[$i] == 0;
+            if ($tablename eq "TSITDESC") {
+               if ($col[$i] eq "ADVISE") {
+                  $translate = 1 if ord(substr($cpydata,-1,1)) == 64;
+               }
+            }
+            eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/' if $translate == 1;
          }
 
         $cpydata =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
@@ -1018,7 +1148,6 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          next if $col[$i] eq "LOCFLAG"; ;
          next if $col[$i] eq "GBLTMSTMP";
          next if $col[$i] eq "LCLTMSTMP";
-#DB::single=2;
          my $tkey = $tablefn . "!" . $col[$i];
          my $tx = $hTableIgnoreKeys{$tkey};
          if (defined $tx) {
@@ -1092,8 +1221,45 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
    } elsif ($opt_ix == 1) {                      # index only output
       $lpre = "";
       $insql = $showkey;
-   }
-   else {                                   # TSV processing
+   } elsif ($opt_ref == 1) {                      # reference output
+      $lpre = "";
+      $insql = "";
+      $cx = $colx{$opt_showone};                 # index for showkey
+
+      # Prepare current record position
+      $insql .= sprintf("%06X:", $crecpos) . " ";  # label position in hex
+
+      # Next sixteen bytes displayed in hex at thhe showkey position
+      for($i=0; $i < 16; $i++) {                                              # for each input character
+         $char = substr($cpydata_raw,$i+$colpos[$cx],1);                                     # select out one byte
+         $insql .= sprintf( "%02X", ord($char));                              # convert to hex
+      }
+      # Next LSTDATE if present
+      $insql .= "  ";
+      $insql .= sprintf( "%16s", $curr_lstdate);
+
+
+      # Next ASCII value of showkey
+      my $len = $collen[$cx];
+      my $pos = $colpos[$cx];
+      $insql .= "  ";
+      for($i=0; $i < $len; $i++) {
+         $char = substr($cpydata_raw,$pos+$i,1);                                      # select out one byte
+         $insql .= ($char =~ m#[!-~ ]# ) ? $char : '.';                     # add as character if printable or period if not
+      }
+      $insql .= "  ";
+      for($i=0; $i < $len; $i++) {
+         $char = substr($cpydata_raw,$pos+$i,1);                                      # select out one byte
+         if (ord($char)< 64) {
+            $insql .= " ";
+         } else {
+            eval '$char =~ tr/\000-\377/' . $ccsid1047 . '/';
+            $insql .= $char;
+         }
+      }
+
+      $insql =~ s/(\s+$)//g;                     # remove trailing white space
+   } else {                                   # TSV processing
       $insql .= ");";
 
       # prepare line number/delete/showkey depending on options
@@ -1212,3 +1378,6 @@ exit;
 #            auto identification did not work
 #            -tlim 0 did not work
 # 1.280000 : correct problem with non-zos case
+# 1.290000 : Add -ref reference output to help identify database broken cases
+#          : Add -skip to skip over database broken sections
+#          : Add -varyrec to handle zome z/OS cases
