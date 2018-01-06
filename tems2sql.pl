@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.30000;
+$gVersion = 1.31000;
 
 
 # no CPAN packages used
@@ -1185,7 +1185,6 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
             $lpre .= "\t";
          }
       }
-      ++$cnt;
    }
    elsif ($opt_txt == 1) {                       # txt style
       $lpre = "";
@@ -1384,3 +1383,4 @@ exit;
 #          : Add -skip to skip over database broken sections
 #          : Add -varyrec to handle zome z/OS cases
 # 1.300000 : Correct length calculation in none z/OS case
+# 1.310000 : Correct line count in message for -v option
