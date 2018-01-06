@@ -36,8 +36,9 @@
 # 0.950000 : handle tables with names not beginning with I
 # 0.970000 : handle excludes of null values
 # 1.000000 : Remove CPAN requirements
+# 1.050000 : Handle I2 and I4 type columns
 
-$gVersion = 1.000000;
+$gVersion = 1.050000;
 
 
 # no CPAN packages used
@@ -629,32 +630,49 @@ TOP: while ($recpos < $qa1size) {
 
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
+#if ($col[$i] eq "PDT") {
+#$DB::single=2;
+#}
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
       $clen = $collen[$i];                       # length of data
-      $firstc = substr($coldtyp[$i],0,1);        # if first character
-      if ($firstc eq "V") {                      # is V...
+      if ($coldtyp[$i] eq "O4I2") {              # Short Integer
          if ($qa_endian == 0) {                  # big_endian size
-            $clen = unpack("n",substr($buffer,$dpos,2));
+            $cpydata = unpack("n",substr($buffer,$dpos,2));
          } else {                                # else little endian size
-            $clen = unpack("v",substr($buffer,$dpos,2));  # pick out length
+            $cpydata = unpack("v",substr($buffer,$dpos,2));  # pick out length
          }
-         $dpos += 2;                                   # and adjust starting point of data
-      }
-      $cpydata = substr($buffer,$dpos, $clen);   # first stab at data
-      $firstc = substr($cpydata,0,1);            # if first character binary zero, set string to null
-      if (ord($firstc) == 0) {
-         $cpydata = "";
-      }
-      $cpydata =~ s/(\x00+$)//g;                 # remove trailing binary zeroes
+      } elsif ($coldtyp[$i] eq "O4I4") {         # Full Integer
+         if ($qa_endian == 0) {                  # big_endian size
+            $cpydata = unpack("n",substr($buffer,$dpos,4));
+         } else {                                # else little endian size
+            $cpydata = unpack("v",substr($buffer,$dpos,4));  # pick out length
+         }
+      } else {
+         $firstc = substr($coldtyp[$i],0,1);        # if first character
+         if ($firstc eq "V") {                      # is V...
+            if ($qa_endian == 0) {                  # big_endian size
+               $clen = unpack("n",substr($buffer,$dpos,2));
+            } else {                                # else little endian size
+               $clen = unpack("v",substr($buffer,$dpos,2));  # pick out length
+            }
+            $dpos += 2;                                   # and adjust starting point of data
+         }
+         $cpydata = substr($buffer,$dpos, $clen);   # first stab at data
+         $firstc = substr($cpydata,0,1);            # if first character binary zero, set string to null
+         if (ord($firstc) == 0) {
+            $cpydata = "";
+         }
+         $cpydata =~ s/(\x00+$)//g;                 # remove trailing binary zeroes
 
-      # Some z/OS columns are not in ASCII. For those ones convert to ascii
+         # Some z/OS columns are not in ASCII. For those ones convert to ascii
 
-      if ($zos == 1 && $colutf8[$i] == 0 ) {
-         eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/';
+         if ($zos == 1 && $colutf8[$i] == 0 ) {
+            eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/';
+         }
+
+        $cpydata =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
       }
-
-      $cpydata =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
 
       # if there are excludes and this data matches, then skip this one
 
