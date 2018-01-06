@@ -18,11 +18,11 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.35000;
+$gVersion = 1.36000;
 
 
 # no CPAN packages used
-#use Data::Dumper;               # debug only
+use Data::Dumper;               # debug only
 
 # following table is used in EBCDIC to ASCII conversion using ccsid 1047 - valid for z/OS
 # adapted from CPAN module Convert::EBCDIC;
@@ -66,6 +66,7 @@ my $opt_sct;             # count of show keys collected
 my @opt_skey;            # show keys
 my $opt_sx;              # show key exclude file
 my $opt_si;              # show key include file
+my $opt_sql;             # SQL table name - needed for QA1CDSCA which has multiple SQL table names
 my $opt_table;           # set tablename
 my @opt_excl = ();       # set excludes to null
 my $opt_txt;             # text output
@@ -115,7 +116,7 @@ TOBJCOBJ => 'QA11CCOBJ,OBJNAME,OBJCLASS,COBJNAME,COBJCASS',
 TSITSTSC => 'QA1CSTSC,SITNAME,TYPE,NODE,DELTASTAT,ORIGINNODE',
 TSITSTSH => 'QA1CSTSH,GBLTMSTMP,SITNAME,NODE,ORIGINNODE,DELTASTAT,FULLNAME,ATOMIZE',
 TEIBLOGT => 'QA1CEIBL,GBLTMSTMP,LSTUSRPRF,OBJNAME,OPERATION,ORIGINNODE,TABLENAME',
-SYSTABLES => 'QA1CDSCA,APPL_NAME,RECTYPE,TABL_NAME,VERS_PROBE,LOCATOR,DELETER,INSERTER,UPDATER',
+SYSTABLES => 'QA1CDSCA,RECORDTYPE,PACKAGE,PACKNAME,CREATED,LSTRELEASE,LSTCOMPAT,LSTDATE',
 CCT => 'QA1DCCT,KEY,NAME,DESC,CMD,TABLES',
 );
 
@@ -224,6 +225,11 @@ while (@ARGV) {
       $opt_si = shift(@ARGV);
       die "option -si with no following filename of includes\n" if !defined $opt_si;
    }
+   elsif ($ARGV[0] eq "-sql") {
+      shift(@ARGV);
+      $opt_sql = shift(@ARGV);
+      die "option -sql with no following filename of includes\n" if !defined $opt_sql;
+   }
    elsif ($ARGV[0] eq "-t") {
       shift(@ARGV);
       $opt_table = shift(@ARGV);
@@ -328,6 +334,7 @@ if (!defined $opt_qib) {$opt_qib=0;}                        # include QIB Column
 if (!@opt_skey) {@opt_skey=();}                             # show keys
 if (!defined $opt_sx) {$opt_sx="";}                         # show key exclude file
 if (!defined $opt_si) {$opt_si="";}                         # show key include file
+if (!defined $opt_sql) {$opt_sql="";}                       # SQL table name
 if (!defined $opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                             # set excludes to null
 if (!defined $opt_txt) {$opt_txt=0;}                        # text output
@@ -483,6 +490,9 @@ foreach $oneline (@kib_data)
    if ($opt_table ne "") {
      next if $words[1] ne $opt_table;
    }
+   if ($opt_sql ne "") {
+      next if $words[1] ne $opt_sql;
+   }
    $tablename = $words[1];
    next if substr($tablename,0,1) eq "I";
    last;
@@ -547,7 +557,7 @@ foreach $oneline (@kib_data)
         $dpos    = substr($oneline,75,15);     # input data position for SYSTABLES per KDS.CAT file
       }
 
-      $dpos    = substr($oneline,75,10);       # input data position
+      #$dpos    = substr($oneline,75,10);       # input data position
       $dpos    =~ s/\s+$//;                    # strip trailing blanks
       $coli++;
       $col[$coli] = $colname;
@@ -605,6 +615,87 @@ foreach $oneline (@kib_data)
    }
 }
 
+# Following logic picks apart the  TEMS data catalog. There is no .cat description
+# of the data but it is pretty easy for the !!PACKAGE entries
+
+if ($tablefn eq "QA1CDSCA") {
+   $coli = -1;       # count of columns for the tablename
+   @col = ();        # array of column names
+   %colx = ();       # associative array column name to index
+   $cx = 0;          # index to column data
+   @coldtyp = ();    # array of data types
+   @colutf8 = ();    # array of UTF-8 values
+   @colpost = ();    # array of data positions
+   @collen = ();     # array of column lengths
+   @colpos = ();     # array of column positions
+   %dtypx = ();      # associative array datatype to index
+   %postx = ();      # associative array position to index
+   my $incol = "RECORDTYPE";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S1";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 1;
+   $colpos[$coli] = 0;
+
+   $incol = "PACKAGE";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S8";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 8;
+   $colpos[$coli] = 1;
+
+   $incol = "PACKNAME";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S10";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 10;
+   $colpos[$coli] = 9;
+
+   # space skipped is for other record types
+
+   $incol = "CREATED";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S16";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 16;
+   $colpos[$coli] = 56;
+
+   $incol = "LSTRELEASE";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S10";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 10;
+   $colpos[$coli] = 72;
+
+   $incol = "LSTCOMPAT";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S10";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 10;
+   $colpos[$coli] = 82;
+
+   $incol = "LSTDATE";
+   $coli += 1;
+   $col[$coli] = $incol;
+   $colx{$incol} = $coli;
+   $coldtyp[$coli] = "O4S16";
+   $colutf8[$coli] = 0;
+   $collen[$coli] = 16;
+   $colpos[$coli] = 92;
+}
+
 # now column data has been corrected, if txt style, validate the columns
 if ($opt_txt == 1) {
    my $tc_errs = 0;
@@ -630,6 +721,7 @@ if ($opt_txt == 1) {
 }
 
 die "No columns found for table $tablefn\n" if $coli == -1;
+
 
 # run through fields and record total length
 # needed for z/OS Table repro
@@ -1430,3 +1522,5 @@ exit;
 # 1.330000 : add -tr to clarify text attributes with embedded tabs, carriage returns and line feeds
 # 1.340000 : Add -endian option to show type of distributed QA1 file - big endian or little endian
 # 1.350000 : Add -last which with -ee will only output the most recent deleted object
+# 1.360000 : Add minimal support for QA1CDSCA and SYSTABLES - actually packages
+#            QA1CDSCA is not described in a .cat file but the logic fakes it
