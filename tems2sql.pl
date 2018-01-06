@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.121000;
+$gVersion = 1.22000;
 
 
 # no CPAN packages used
@@ -99,6 +99,17 @@ TSITSTSH => 'QA1CSTSH,GBLTMSTMP,SITNAME,NODE,ORIGINNODE,DELTASTAT,FULLNAME,ATOMI
 TEIBLOGT => 'QA1CEIBL,GBLTMSTMP,LSTUSRPRF,OBJNAME,OPERATION,ORIGINNODE,TABLENAME',
 SYSTABLES => 'QA1CDSCA,APPL_NAME,RECTYPE,TABL_NAME,VERS_PROBE,LOCATOR,DELETER,INSERTER,UPDATER',
 CCT => 'QA1DCCT,KEY,NAME,DESC,CMD,TABLES',
+);
+
+%hQIBclassid = (
+TSITDESC => '5140',
+EVNTMAP  => '2250',
+TNODELST => '5529',
+TOBJACCL => '5535',
+TGROUP   => '2009',
+TGROUPI  => '2011',
+TNAME    => '2012',
+EVNTSERVER => '5990',
 );
 
                                         #beh initialize $kibfn, $qa1fn - to satisfy GiveHelp()
@@ -235,6 +246,8 @@ if (!$opt_txt) {$opt_txt=0;}                        # text output
 if (!$opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
 if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
 if (!$opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
+
+my $got_qibclassid = 0;                             # when 1 a QIBCLASSID was found
 
 # If running on Windows initialize for Windows.
 if ($gWin) {
@@ -425,21 +438,23 @@ foreach $oneline (@kib_data)
       $intable =~ s/\s+$//;                    # strip trailing blanks
       next if $intable ne $tablename;          # skip if not correct table name
       $colname = substr($oneline,19,10);       # input column name
-      $colname =~ s/\s+$//;                 # strip trailing blanks
-      if ($opt_qib == 0) {
-         next if substr($colname,0,3) eq "QIB";  # QIB columns are virtual and no data in TEMS database file
+      $colname =~ s/\s+$//;                    # strip trailing blanks
+#$DB::single=2;
+      if (substr($colname,0,3) eq "QIB") {
+        $got_qibclassid = 1 if $colname eq "QIBCLASSID";
+        next if $opt_qib == 0;
       }
-      $dtype   = substr($oneline,57,10);       # input data type
-      $dtype   =~ s/\s+$//;                  # strip trailing blanks
+      $dtype   = substr($oneline,57,10);      # input data type
+      $dtype   =~ s/\s+$//;                   # strip trailing blanks
       if ($tablename ne "SYSTABLES") {
-        $dpos    = substr($oneline,75,10);       # input data position
+        $dpos    = substr($oneline,75,10);    # input data position
       }
       else {
-        $dpos    = substr($oneline,75,15);       # input data position for SYSTABLES per KDS.CAT file
+        $dpos    = substr($oneline,75,15);     # input data position for SYSTABLES per KDS.CAT file
       }
 
       $dpos    = substr($oneline,75,10);       # input data position
-      $dpos    =~ s/\s+$//;                  # strip trailing blanks
+      $dpos    =~ s/\s+$//;                    # strip trailing blanks
       $coli++;
       $col[$coli] = $colname;
       $colx{$colname} = $coli;
@@ -780,6 +795,11 @@ TOP: while ($recpos < $qa1size) {
             $insql .= ", ";
          }
       }
+#$DB::single=2;
+      if ($got_qibclassid == 1) {
+         my $hx = $hQIBclassid{$tablename};
+         $insql .= ", QIBCLASSID" if defined  $hx;
+      }
       $insql .= ") VALUES (";
    }
 
@@ -909,8 +929,12 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       else {                                        # INSERT SQL style
          $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
          $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
+#$DB::single=2 if $i >=27;
          if ($i < $coli) {
             $insql .= ", ";
+         } elsif ($got_qibclassid == 1) {
+            my $hx = $hQIBclassid{$tablename};
+            $insql .= ",\'" . $hQIBclassid{$tablename} . "\'" if defined $hx;
          }
       }
    }
@@ -1062,3 +1086,4 @@ exit;
 #            Allow -tc to set multiple columns
 #            Add -o option for output control
 # 1.210000 : Better checking on arguments make sure cat and qa1 file exist
+# 1.220000 : add QIBCLASSID column for certain table which have that column
