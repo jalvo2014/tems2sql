@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.22000;
+$gVersion = 1.25000;
 
 
 # no CPAN packages used
@@ -54,6 +54,9 @@ my $opt_l;               # line number prefix
 my $opt_v;               # CSV output
 my $opt_e;               # show deleted flag
 my $opt_ee;              # show only deleted flag
+my $opt_future;             # monitor for LSTDATE beyond given time
+my $opt_future_date;        # When 1, a future date was found
+my $opt_future_date_count = 0; #count of future dates
 my $opt_ix;              # output only index records
 my $opt_qib;             # include QIB Columns
 my $opt_sct;             # count of show keys collected
@@ -63,6 +66,8 @@ my $opt_si;              # show key include file
 my $opt_table;           # set tablename
 my @opt_excl = ();       # set excludes to null
 my $opt_txt;             # text output
+my $opt_val;             # validation output
+my $opt_val_nickname = "";    # validation nickname
 my @opt_tc = ();         # set text columns to null
 my @opt_tlim;            # txt output column display limit, 0 means all, default 256.
 my $opt_test;
@@ -101,15 +106,26 @@ SYSTABLES => 'QA1CDSCA,APPL_NAME,RECTYPE,TABL_NAME,VERS_PROBE,LOCATOR,DELETER,IN
 CCT => 'QA1DCCT,KEY,NAME,DESC,CMD,TABLES',
 );
 
+# following is list of modules which need a QIBCLASSID column
+# That is need to ensure the replaced objects propogate from
+# the hub TEMS to TEPS and other TEMS
+
 %hQIBclassid = (
-TSITDESC => '5140',
-EVNTMAP  => '2250',
-TNODELST => '5529',
-TOBJACCL => '5535',
-TGROUP   => '2009',
-TGROUPI  => '2011',
-TNAME    => '2012',
+TSITDESC   => '5140',
+EVNTMAP    => '2250',
 EVNTSERVER => '5990',
+TNODELST   => '5529',
+TOBJACCL   => '5535',
+TGROUP     => '2009',
+TGROUPI    => '2011',
+TNAME      => '2012',
+TPCYDESC   => '5130',
+TACTYPCY   => '5131',
+TCALENDAR  => '5652',
+TOVERRIDE  => '5650',
+TOVERITEM  => '5651',
+CCT        => '5960',
+TAPPLPROPS => '5530',
 );
 
                                         #beh initialize $kibfn, $qa1fn - to satisfy GiveHelp()
@@ -121,6 +137,7 @@ else {
     $kibfn = "\$CANDLEHOME/cms/rkdscatl/kib.cat";
     $qa1fn = "/tmp/QA1DNSAV.DB";
 }
+
 
 while (@ARGV) {
    if ($ARGV[0] eq "-h") {
@@ -146,6 +163,11 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_e = 1;
       $opt_ee = 1;
+   }
+   elsif ($ARGV[0] eq "-future") {
+      shift(@ARGV);
+      $opt_future = shift(@ARGV);
+      die "option -future with no following date stamp\n" if !defined $opt_future;
    }
    elsif ($ARGV[0] eq "-ix") {
       shift(@ARGV);
@@ -185,6 +207,14 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-txt") {
       shift(@ARGV);
       $opt_txt = 1;
+   }
+   elsif ($ARGV[0] eq "-val") {
+      shift(@ARGV);
+      $opt_val = 1;
+      if (defined $ARGV[0]) {
+         $opt_val_nickname = shift(@ARGV) if substr($ARGV[0],0,1) ne "-";
+      }
+      $opt_val_nickname = "default" if $opt_val_nickname eq "";
    }
    elsif ($ARGV[0] eq "-f") {
       shift(@ARGV);
@@ -243,6 +273,7 @@ if (!$opt_si) {$opt_si="";}                         # show key include file
 if (!$opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
 if (!$opt_txt) {$opt_txt=0;}                        # text output
+if (!$opt_val)  {$opt_val=0;}                         # text output
 if (!$opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
 if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
 if (!$opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
@@ -284,8 +315,8 @@ if ($opt_ix != 0  && $#opt_skey == -1) {
    die("Index only output -ix specified but -s is required and not specified\n");
 }
 
-if ($opt_l + $opt_v + $opt_txt + $opt_ix> 1) {
-   die("Options -l and -v  and -txt and -ix are mutually exclusive\n");
+if ($opt_l + $opt_v + $opt_txt + $opt_ix +$opt_val > 1) {
+   die("Options -l and -v  and -txt and -ix and -val are mutually exclusive\n");
 }
 
 
@@ -355,6 +386,7 @@ if (defined $opt_o) {
       if ($opt_ix) { $opt_ofn = $tablefn . "\.DB\.ix" }
       elsif ($opt_l) { $opt_ofn = $tablefn . "\.DB\.lst" }
       elsif ($opt_txt) { $opt_ofn = $tablefn . "\.DB\.txt" }
+      elsif ($opt_val) { $opt_ofn = $tablefn . "\.DB\.val" }
       elsif ($opt_v) { $opt_ofn = $tablefn . "\.DB\.csv" }
       else { $opt_ofn = $tablefn . "\.DB\.sql" }
    }
@@ -439,7 +471,6 @@ foreach $oneline (@kib_data)
       next if $intable ne $tablename;          # skip if not correct table name
       $colname = substr($oneline,19,10);       # input column name
       $colname =~ s/\s+$//;                    # strip trailing blanks
-#$DB::single=2;
       if (substr($colname,0,3) eq "QIB") {
         $got_qibclassid = 1 if $colname eq "QIBCLASSID";
         next if $opt_qib == 0;
@@ -736,6 +767,10 @@ elsif ($opt_txt == 1) {
    ++$cnt;
 
 }
+elsif ($opt_val == 1) {
+   print "Nickname:" . $opt_val_nickname . " Table:" . $tablename . "  Internal Name:" . $tablefn . "\n\n";
+   $cnt += 2;
+}
 
 TOP: while ($recpos < $qa1size) {
    seek(QA,$recpos,0);                                 # position file for reading
@@ -781,7 +816,7 @@ TOP: while ($recpos < $qa1size) {
    $opt_sct = -1;
    $insql = "";
 
-   if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 ) {
+   if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 && $opt_val == 0 ) {
       # data record found. Generate insert SQL which has this form:
       # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
@@ -795,7 +830,6 @@ TOP: while ($recpos < $qa1size) {
             $insql .= ", ";
          }
       }
-#$DB::single=2;
       if ($got_qibclassid == 1) {
          my $hx = $hQIBclassid{$tablename};
          $insql .= ", QIBCLASSID" if defined  $hx;
@@ -803,7 +837,7 @@ TOP: while ($recpos < $qa1size) {
       $insql .= ") VALUES (";
    }
 
-
+$opt_future_date = 0;                               # asume date is not in future
 
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
@@ -877,6 +911,14 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
            }
          }
       }
+      if ($col[$i] eq "LSTDATE"){                          # If checking LSTDATE record that fact
+         if (defined $opt_future) {
+            if ($cpydata gt $opt_future) {
+               $opt_future_date = 1;
+               $opt_future_date_count += 1;
+            }
+         }
+      }
 
       # if a show column is specified, record it now
 
@@ -926,10 +968,16 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
             last;
          }
       }
+      elsif ($opt_val == 1) {                       # validate style - line per column
+         $insql = $col[$i] . " " x (10 + 1 - length($col[$i]));
+         $insql .= sprintf("%04d", length($cpydata));
+         $insql .= " " . $cpydata . "\n";
+         print $insql;
+         $cnt++
+      }
       else {                                        # INSERT SQL style
          $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
          $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
-#$DB::single=2 if $i >=27;
          if ($i < $coli) {
             $insql .= ", ";
          } elsif ($got_qibclassid == 1) {
@@ -980,6 +1028,13 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          $insql .= $extra_space;
       }
       $insql =~ s/(\s+$)//g;                     # remove trailing white space
+   } elsif ($opt_val == 1) {                     # validate style print record key
+      $insql = "*showkey*  ";
+      $insql .= sprintf("%04d", length($showkey));
+      $insql .= " " . $showkey . "\n\n";
+      print $insql;
+      $cnt +=2;
+      next;
    } elsif ($opt_ix == 1) {                      # index only output
       $lpre = "";
       $insql = $showkey;
@@ -992,6 +1047,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       if ($opt_l) {
          $lpre = "[" . $l;
          if ($del != 0) {$lpre .= "-deleted";}
+         $lpre .= "-future" if $opt_future_date;
          if ($showkey ne "") {$lpre .= " " . $showkey;}
          $lpre .=  "] ";
       }
@@ -1001,6 +1057,10 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
 }
 
 print STDERR "Wrote $cnt lines for $tablename\n";
+
+if ($opt_future) {
+   print STDERR "Found $opt_future_date_count LSTDATEs beyond $opt_future in $qa1fn\n" if $opt_future_date_count > 0;
+}
 
 # all done
 
@@ -1037,6 +1097,7 @@ sub GiveHelp
     -e              include both normal and deleted rows
     -ee             output only deleted rows
     -qib            include QIB columns
+    -future itmstamp   produce error when LSTDATE is in the future
     -s key          show key value before INSERT SQL
     -sx file        exclude rows where showkey contained in this file
     -si file        include rows where showkey contained in this file
@@ -1087,3 +1148,6 @@ exit;
 #            Add -o option for output control
 # 1.210000 : Better checking on arguments make sure cat and qa1 file exist
 # 1.220000 : add QIBCLASSID column for certain table which have that column
+# 1.230000 : add some QIBCLASSID table id values
+# 1.240000 : -future itmstamp to create error report on LSTDATE beyond that stamp
+# 1.250000 : -va option to create validate files
