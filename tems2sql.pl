@@ -13,35 +13,12 @@
 #  john alvord, IBM Corporation, 30 Dec 2010
 #  jalvord@us.ibm.com
 #
-# tested on Windows Activestate 5.12.2
+# tested on
+# This is perl 5, version 16, subversion 3 (v5.16.3) built for MSWin32-x86-multi-thread
+# (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-# puzzles - in tbe TNODESAV case, there are two columns which
-# map to the same position [NODE and ORIGINNODE]. It might
-# be necessary to suppress one of them in the INSERT statement.
-# 0        : New script qa1dump.pl
-# 0.101201 : After review. aduran@us.ibm.com added help and made other minor changes.
-# 0.400000 : rename to tems2sql and work with qa1 db file directly. kgldbutl failed with
-#          : I/O errors in some cases
-# 0.500000 : calculate recsize using header - to handle cases where the first
-#            record is deleted
-# 0.600000 : handle fields with embedded single quotes
-# 0.700000 : handle z/OS repro files calculate recsize from cat table, add -qib option
-# 0.750000 : add != test in exclude
-# 0.800000 : handle Relrec case and ignore I type table definitions needed for TSITSTSH
-# 0.850000 : handle Relrec case better and figure out tablename in more cases
-# 0.850000 : handle -h and absent -l better
-# 0.900000 : add -sx and -si and -v controls
-# 0.930000 : add -txt and -tc options
-# 0.950000 : handle tables with names not beginning with I
-# 0.970000 : handle excludes of null values
-# 1.000000 : Remove CPAN requirements
-# 1.050000 : Handle I2 and I4 type columns
-# 1.100000 : Handle tables with multiple show keys
-# 1.150000 : Index only and delete only added
-# 1.160000 : truncate trailing blanks on TXT output lines
-# 1.170000 : Handle tables with L type columns
-$gVersion = 1.170000;
+$gVersion = 1.120000;
 
 
 # no CPAN packages used
@@ -72,6 +49,7 @@ $gWin = (-e "C:/") ? 1 : 0;       # determine Windows versus Linux/Unix for deta
 # Work through the command line options
 
 my $opt_h;               # help flag
+my $opt_d;               # debug flag
 my $opt_l;               # line number prefix
 my $opt_v;               # CSV output
 my $opt_e;               # show deleted flag
@@ -86,11 +64,60 @@ my $opt_table;           # set tablename
 my @opt_excl = ();       # set excludes to null
 my $opt_txt;             # text output
 my @opt_tc = ();         # set text columns to null
+my @opt_tlim;            # txt output column display limit, 0 means all, default 256.
 my $opt_test;
+my $opt_fav;
+my %hQA1names;
+my @tableInfo = ();          # set to null
+my @favColNames = ();         # set to null
+my $DEBUG = "YES";
+my $opt_o;               # when defined, set output controls
+my $opt_ofn;             # output filename
+
+%hQA1names = (
+TNODELST => 'QA1CNODL,LSTDATE,NODE,NODELIST,NODETYPE',
+TNODESAV => 'QA1DNSAV,NODE,NODETYPE,GBLTMSTMP,O4ONLINE,ONLINE,THRUNODE,ORIGINNODE',
+TNODESTS => 'QA1DSNOS,NODE,NODETYPE,GBLTMSTMP,O4ONLINE,ONLINE,THRUNODE',
+EVNTMAP => 'QA1DEVMP,ID,LSTUSRPRF,LSTDATE,MAP',
+EVNTSERVER => 'QA1DEVSR,DFLTSRVR,HOSTNAME,SRVRNAME,SRVRTYPE',
+TACTYPCY => 'QA1DACTP,PCYNAME,LSTDATE,TYPESTR,CCTKEY,ACTINFO,CMD',
+TAPPLPROPS => 'QA1DAPPL,ID,PRODUCT,PRODVER,SEEDSTATE,STATUS,GBLTMSTMP',
+TCALENDAR => 'QA1SCALE,NAME,AUTOSTART,TYPE,LSTDATE,LSTUSRPRF,DATA',
+TGROUP => 'QA1DGRPA,GRPNAME,GRPCLASS,LSTDATE,LSTUSRPRF,INFO,TEXT',
+TGROUPI => 'QA1DGRPI,GRPCLASS,OBJNAME,LSTDATE,LSTUSRPRF,INFO',
+TNAME => 'QA1DNAME,OBJCLASS,ID,FULLNAME',
+TOBJACCL => 'QA1DOBJA,ACTIVATION,HUB,NODEL,OBJCLASS,OBJNAME,LSTDATE,LSTUSRPRF',
+TOVERRIDE => 'QA1DOVRD,SITNAME,AUTOSTART,PRIORITY,LSTDATE,LSTUSRPRF',
+TOVERITEM => 'QA1DOVRI,CALID,LSTDATE,DATA',
+TPCYDESC => 'QA1DPCYF,PCYNAME,HUB,AUTOSTART,LSTDATE,LSTUSRPRF,PCYOPT',
+TSITDESC => 'QA1CSITF,SITNAME,HUB,AUTOSTART,REEV_DAYS,REEV_TIME,PDT,CMD,SITINFO',
+TUSER => 'QA1CSPRD,UNAME,LSTDATE,LSTUSRPRF,USERNAME,INFO',
+SITDB => 'QA1CRULD,RULENAME,PREDICATE',
+TOBJCOBJ => 'QA11CCOBJ,OBJNAME,OBJCLASS,COBJNAME,COBJCASS',
+TSITSTSC => 'QA1CSTSC,SITNAME,TYPE,NODE,DELTASTAT,ORIGINNODE',
+TSITSTSH => 'QA1CSTSH,GBLTMSTMP,SITNAME,NODE,ORIGINNODE,DELTASTAT,FULLNAME,ATOMIZE',
+TEIBLOGT => 'QA1CEIBL,GBLTMSTMP,LSTUSRPRF,OBJNAME,OPERATION,ORIGINNODE,TABLENAME',
+SYSTABLES => 'QA1CDSCA,APPL_NAME,RECTYPE,TABL_NAME,VERS_PROBE,LOCATOR,DELETER,INSERTER,UPDATER',
+CCT => 'QA1DCCT,KEY,NAME,DESC,CMD,TABLES',
+);
+
+                                        #beh initialize $kibfn, $qa1fn - to satisfy GiveHelp()
+if ($gWin) {
+    $kibfn = "\$CANDLE_HOME/CMS/rkdscatl/kib.cat";
+    $qa1fn = "C:/temp/nsav/QA1DNSAV.DB";
+}
+else {
+    $kibfn = "\$CANDLEHOME/cms/rkdscatl/kib.cat";
+    $qa1fn = "/tmp/QA1DNSAV.DB";
+}
 
 while (@ARGV) {
    if ($ARGV[0] eq "-h") {
       &GiveHelp;                        # print help and exit
+   }
+   elsif ($ARGV[0] eq "-d") {
+      shift(@ARGV);
+      $opt_d = 1;
    }
    elsif ($ARGV[0] eq "-l") {
       shift(@ARGV);
@@ -126,7 +153,7 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-sx") {
       shift(@ARGV);
       $opt_sx = shift(@ARGV);
-      die "option -sx with no following filename of includes\n" if !defined $opt_sx;
+      die "option -sx with no following filename of excludes\n" if !defined $opt_sx;
    }
    elsif ($ARGV[0] eq "-si") {
       shift(@ARGV);
@@ -148,21 +175,46 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_txt = 1;
    }
+   elsif ($ARGV[0] eq "-f") {
+      shift(@ARGV);
+      $opt_fav = 1;
+   }
    elsif ($ARGV[0] eq "-tc") {
       shift(@ARGV);
       $opt_test = shift(@ARGV);
       die "option -tc with no following column name\n" if !defined $opt_test;
-      push(@opt_tc,$opt_test);
+      if (index($opt_test,",") == -1){
+         push(@opt_tc,$opt_test);           # add single column to txt array
+      } else {
+         push(@opt_tc,split(/,/,$opt_test));# add an list of columns to txt array
+      }
+   }
+   elsif ($ARGV[0] eq "-tlim") {
+      shift(@ARGV);
+      $opt_tlim = shift(@ARGV);
+      die "option -tlim with no following number\n" if !defined $opt_tlim;
+   }
+   elsif ($ARGV[0] eq "-o") {           # -o filename, set output
+      $opt_o = "";                      # -o calculate output name based on function
+      shift(@ARGV);                     # otherwise send to STDOUT
+      if (defined $ARGV[0]) {
+         if (substr($ARGV[0],0,1) ne "-") {
+            $opt_o = $ARGV[0];
+            shift(@ARGV);
+         }
+      }
    }
    else {
       last;
    }
-
 }
+
+
 $kibfn = $ARGV[0] if defined($ARGV[0]);
 $qa1fn = $ARGV[1] if defined($ARGV[1]);
 
 if (!$opt_h) {$opt_h=0;}                            # help flag
+if (!$opt_d) {undef $DEBUG;}                        # debug mode is turned off
 if (!$opt_l) {$opt_l=0;}                            # line number prefix
 if (!$opt_v) {$opt_v=0;}                            # TSV output
 if (!$opt_e) {$opt_e=0;}                            # show deleted flag
@@ -175,7 +227,9 @@ if (!$opt_si) {$opt_si="";}                         # show key include file
 if (!$opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
 if (!$opt_txt) {$opt_txt=0;}                        # text output
+if (!$opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
 if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
+if (!$opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
 
 # If running on Windows initialize for Windows.
 if ($gWin) {
@@ -184,7 +238,7 @@ if ($gWin) {
    $ITM =~ s/\\/\//g;
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if !defined($ARGV[0]);
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if $kibfn eq ".";
-   $qa1fn = "C:/temp/nsav/QA1DNSAV.DB"        if !defined($ARGV[1]);
+   $qa1fn = "$ITM/cms"                        if !defined($ARGV[1]);;
 }
 
 # if running on Linux/Unix initialize for Windows
@@ -198,7 +252,6 @@ else {
 
 if ($opt_sx ne "" && $opt_si ne "") {
    die("Both -sx and -si specified - only one allowed\n");
-
 }
 
 if ($opt_sx ne "" && $#opt_skey == -1) {
@@ -248,28 +301,50 @@ if ($opt_si ne "") {
    foreach $oneline (@ksi_data) {
       chop $oneline;
       $oneline =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
-      next if $oneline eq '';                    # ignore blanks
+      next if $oneline eq "";                    # ignore blanks
       $show_include{$oneline} = 1;
    }
-
 }
 
 
 # (1) determine the table name involved from the input parameter or from -t option
 #
 $qa1fn =~ s/\\/\//g;
+
 if ($opt_table ne "") {
-   $tablefn = $opt_table;
+    $tablefn = $opt_table;
+
+##? Unix style option needed
+#    open FILE, ">c:/tmp/" . $opt_table . ".txt";
+#    select FILE; # print will use FILE instead of STDOUT
 } else {
-   @words = split("\\/",$qa1fn);
-   if ($#words != -1) {
-      @words = split("\\.",$words[$#words]);
-   }
-   else {
-      @words = split("\\.",$qa1fn);
-   }
-   $tablefn = $words[0];
+
+    # get internal table name from $qa1fn
+    @words = split("\\/",$qa1fn);
+
+    if ($#words != -1) {
+        @words = split("\\.",$words[$#words]);
+    }
+    else {
+        @words = split("\\.",$qa1fn);
+    }
+    $tablefn = $words[0];
 }
+if (defined $opt_o) {
+   if ($opt_o ne "") {
+      $opt_ofn = $opt_o;
+   } else {
+      if ($opt_ix) { $opt_ofn = $tablefn . "\.DB\.ix" }
+      elsif ($opt_l) { $opt_ofn = $tablefn . "\.DB\.lst" }
+      elsif ($opt_txt) { $opt_ofn = $tablefn . "\.DB\.txt" }
+      elsif ($opt_v) { $opt_ofn = $tablefn . "\.DB\.csv" }
+      else { $opt_ofn = $tablefn . "\.DB\.sql" }
+   }
+   $opt_ofn =~ s|\\|\/|g;  # convert backslash to forward slash
+   open FILE, ">$opt_ofn" or die "Unable to open output file $opt_ofn\n";
+   select FILE;              # print will use FILE instead of STDOUT
+}
+
 
 # (2) review the kib catalog file and see what table name
 # is associated with the table filename
@@ -293,11 +368,23 @@ foreach $oneline (@kib_data)
    if (substr($oneline,0,1) ne "T") {next;}
    @words = split(" ",$oneline);
    if ($words[2] ne $testfn) {next;}
+   if ($opt_table ne "") {
+     next if $words[1] ne $opt_table;
+   }
    $tablename = $words[1];
    next if substr($tablename,0,1) eq "I";
    last;
 }
 if ($tablename eq "") {die("kib catalog missing tablefn $testfn.\n");}
+
+print STDERR "opt_table=$opt_table; tablefn=$tablefn; kibfn=$kibfn; qa1fn=$qa1fn\n" if $DEBUG;
+
+if ($opt_fav) {
+   @tableInfo = split(/,/, $hQA1names{$tablename});
+   for $i (1..scalar(@tableInfo) -1) {
+      push @favColNames, $tableInfo[$i];
+   }
+}
 
 # (3) gather catalog definitions associated with the tablename
 
@@ -340,6 +427,13 @@ foreach $oneline (@kib_data)
       }
       $dtype   = substr($oneline,57,10);       # input data type
       $dtype   =~ s/\s+$//;                  # strip trailing blanks
+      if ($tablename ne "SYSTABLES") {
+        $dpos    = substr($oneline,75,10);       # input data position
+      }
+      else {
+        $dpos    = substr($oneline,75,15);       # input data position for SYSTABLES per KDS.CAT file
+      }
+
       $dpos    = substr($oneline,75,10);       # input data position
       $dpos    =~ s/\s+$//;                  # strip trailing blanks
       $coli++;
@@ -354,7 +448,8 @@ foreach $oneline (@kib_data)
 
       $postx{$dpos} = '' if !defined($postx{$dpos});
       $postx{$dpos} =  $postx{$dpos} . " " . $coli;
-      }
+      print STDERR "coli=$coli; col=$col[$coli]; dpos=$dpos; postx=$postx{$dpos}\n" if $DEBUG;
+   }
 
    # State 3 - Processing D - datatype records
    elsif ($state == 3) {
@@ -379,38 +474,46 @@ foreach $oneline (@kib_data)
    elsif ($state == 5)  {
       if ($firstc ne "P") {last;}
       $key = $words[1];
+    print STDERR "key=" . $key . ";\n" if $DEBUG;
       next if (!defined($postx{$key}) || ($postx{$key} eq ''));
       $ki = $postx{$key};
+    print STDERR "ki=" . $ki . ";\n" if $DEBUG;
       $inpos = $words[3] . $words[4];
       @xpos = split(",",$inpos);
 #     $ilen = substr($xpos[2],3);
       $ipos = substr($xpos[4],3);
+       print STDERR "ipos=" . $ipos . "; inpos=" . $inpos . ";\n" if $DEBUG;
       @ix = split(" ",$ki);
       foreach $kx (@ix)
       {
          $colpos[$kx] = $ipos;
+           print STDERR "colpos[" . $kx . "]=" . $colpos[$kx] . ";\n" if $DEBUG;
       }
    }
 }
-
 
 # now column data has been corrected, if txt style, validate the columns
 if ($opt_txt == 1) {
    my $tc_errs = 0;
    my $tc_cnt = 0;
-   foreach $s (@opt_tc) {                   # look at each requested column
-     $tc_cnt++;
-      next if defined $colx{$s};
-      print STDERR "-tc option $s is an unknown column.\n";
-      $tc_errs++;
-   }
-   if ($tc_errs > 0) {
-      die "-tc errors, correct and retry\n";
-   }
-   if ($tc_cnt == 0) {
-      die "-txt with no -tc options supplied, correct and retry\n";
-   }
 
+   if (@opt_tc) { #beh
+       foreach $s (@opt_tc) {                   # look at each requested column
+         $tc_cnt++;
+          next if defined $colx{$s};
+          print STDERR "-tc option $s is an unknown column.\n" if $DEBUG;
+          $tc_errs++;
+       }
+       if ($tc_errs > 0) {
+          die "-tc errors, correct and retry\n";
+       }
+       if ($tc_cnt == 0) {
+          die "-txt with no -tc options supplied, correct and retry\n";
+       }
+   }                    #beh
+   else {               #beh
+    @opt_tc = @col;     #beh Direct copy; this supports -txt for ALL columns in the table
+   }
 }
 
 die "No columns found for table $tablefn\n" if $coli == -1;
@@ -419,11 +522,13 @@ die "No columns found for table $tablefn\n" if $coli == -1;
 # needed for z/OS Table repro
 my $catsize = 0;
 my $highpos = -1;
+
 for ($i = 0; $i <= $coli; $i++) {
    next if $colpos[$i] < $highpos;
    $highpos = $colpos[$i];
    $highlen = $collen[$i];
 }
+
 $catsize = $highpos + $highlen;
 
 # Read the qa1fn file to extract data and
@@ -575,17 +680,40 @@ if ($opt_v == 1) {                                    # TSV output, emit header 
 
 }
 elsif ($opt_txt == 1) {
-my $len;
-my $pos = 0;
-   $insql = "*";
+   my $len;
+   my $pos = 0;
+   $insql = "";
+   $fmtStr = "";
+   $underCol = "";
+
+   print "Table: " . $tablename . "  Internal Name: " . $tablefn . "\n\n";
+   $cnt += 2;
+
+   @opt_tc = @favColNames if $opt_fav;      #beh Direct copy
    foreach $s (@opt_tc) {                   # look at each requested column
       $cx = $colx{$s};                      # index to column data
       $len = $collen[$cx];
       $len -= 2 if $coldtyp[$cx] eq "V";
-      $insql .= $s . "@" . $pos . "," . $len . " ";
-      $pos += $len + 1;
+      $len = length($s) if length($s) > $len; # beh:BEGIN
+
+      if ($opt_tlim > 0) {
+         if ( $len < $opt_tlim ) {
+            $uLen =  $len;
+         } else {
+            $uLen = $opt_tlim;
+            $len = $opt_tlim;
+         }
+      }
+
+      $fmtStr = "%-" . $len . "s ";
+      $insql .= sprintf $fmtStr, $s;
+      $underline = "-" x  $uLen;
+      $underCol .= $underline . " ";          # beh:END
    }
+
    print $insql . "\n";                     # header line printed to standard output
+   ++$cnt;
+   print $underCol . "\n";                  # beh print underline
    ++$cnt;
 
 }
@@ -630,18 +758,15 @@ TOP: while ($recpos < $qa1size) {
    # record is now in $buffer
 
    $l++;                           # count logical records
-
-
-
    $showkey = "";
    $opt_sct = -1;
    $insql = "";
+
    if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 ) {
       # data record found. Generate insert SQL which has this form:
       # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
       # create initial portion of SQL.
-
       $insql = "INSERT INTO O4SRV." . $tablename . " (";
 
       # column names
@@ -663,6 +788,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
       $clen = $collen[$i];                       # length of data
+
       if ($coldtyp[$i] eq "O4I2") {              # Short Integer
          if ($qa_endian == 0) {                  # big_endian size
             $cpydata = unpack("n",substr($buffer,$dpos,2));
@@ -805,12 +931,28 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
    elsif ($opt_txt == 1) {                       # txt style
       $lpre = "";
       $insql = "";
-      foreach $s (@opt_tc) {                     # look at each requested column
-         $insql .= $txtfrag{$s};
+      foreach $s (@opt_tc) {                      # look at each requested column
+         $cx = $colx{$s};                         # index to column data
+         $len = $collen[$cx];
+         $len -= 2 if $coldtyp[$cx] eq "V";
+         $len = length($s) if length($s) > $len;
+         $len++;
+
+         my $extra_space = "";
+         if ($opt_tlim > 0) {
+            if ( $len < $opt_tlim ) {
+               $fmtCol = "%-" . $len . "s";
+            } else {
+               $fmtCol = "%." . $opt_tlim . "s";
+               $extra_space = " ";
+            }
+         }
+
+         $insql .= sprintf $fmtCol, $txtfrag{$s}; # beh:END
+         $insql .= $extra_space;
       }
       $insql =~ s/(\s+$)//g;                     # remove trailing white space
-   }
-   elsif ($opt_ix == 1) {                        # index only output
+   } elsif ($opt_ix == 1) {                      # index only output
       $lpre = "";
       $insql = $showkey;
    }
@@ -840,6 +982,7 @@ exit 0;
 sub GiveHelp
 {
   $0 =~ s|(.*)/([^/]*)|$2|;
+  $0 =~ s|\\|\/|g;  # convert backslash to forward slash
   print <<"EndOFHelp";
 
   $0 v$gVersion
@@ -856,27 +999,61 @@ sub GiveHelp
 
   Options
     -h              Produce help message
+    -d              write debug messages to STDERR
     -l              show input line number
-    -v              Product tab delimited .txt file for Excel
-    -txt            formatted text output
+    -v              produce tab delimited .txt file for Excel
+    -txt            format 'pretty' text output; all columns output if -f or -tc are not also used
+    -f              output only 'favorite' table columns; used in conjunction with -txt
     -ix             output only show key values
-    -tc             columns to display on output [multiple allowed]
+    -tc             columns to display on output [ e.g. -tc NODE,NODELIST,NODETYPE ]
     -e              include both normal and deleted rows
     -ee             output only deleted rows
     -qib            include QIB columns
     -s key          show key value before INSERT SQL
     -sx file        exclude rows where showkey contained in this file
     -si file        include rows where showkey contained in this file
-    -t table             specify table name
+    -t table        specify 'friendly' table name, i.e. TNODELST, TOBJACCL, ...
     -x key=value    exclude rows where column data starts with value
 
     -e and -s only have effect if -l show line number is present
     -l and -v and -txt are mutually exclusive
+    -f and -tc are mutually exclusive; -f only used w/ -txt, -tc may be used w/ -txt or other options
 
   Examples:
-    $0  $kibfn QA1DNSAV.DB > insert_nsav.sql
+    $0  $kibfn $qa1fn > insert_nsav.sql
 
 EndOFHelp
 exit;
 }
 #------------------------------------------------------------------------------
+# History
+# puzzles - in tbe TNODESAV case, there are two columns which
+# map to the same position [NODE and ORIGINNODE]. It might
+# be necessary to suppress one of them in the INSERT statement.
+# 0        : New script qa1dump.pl
+# 0.101201 : After review. aduran@us.ibm.com added help and made other minor changes.
+# 0.400000 : rename to tems2sql and work with qa1 db file directly. kgldbutl failed with
+#          : I/O errors in some cases
+# 0.500000 : calculate recsize using header - to handle cases where the first
+#            record is deleted
+# 0.600000 : handle fields with embedded single quotes
+# 0.700000 : handle z/OS repro files calculate recsize from cat table, add -qib option
+# 0.750000 : add != test in exclude
+# 0.800000 : handle Relrec case and ignore I type table definitions needed for TSITSTSH
+# 0.850000 : handle Relrec case better and figure out tablename in more cases
+# 0.850000 : handle -h and absent -l better
+# 0.900000 : add -sx and -si and -v controls
+# 0.930000 : add -txt and -tc options
+# 0.950000 : handle tables with names not beginning with I
+# 0.970000 : handle excludes of null values
+# 1.000000 : Remove CPAN requirements
+# 1.050000 : Handle I2 and I4 type columns
+# 1.100000 : Handle tables with multiple show keys
+# 1.150000 : Index only and delete only added
+# 1.160000 : truncate trailing blanks on TXT output lines
+# 1.170000 : Handle tables with L type columns
+# 1.200000 : Adopt and extend Bill Horne enhancements
+#            Add -f favorite columns for -txt option
+#            Better output format for -txt
+#            Allow -tc to set multiple columns
+#            Add -o option for output control
