@@ -40,7 +40,8 @@
 # 1.100000 : Handle tables with multiple show keys
 # 1.150000 : Index only and delete only added
 # 1.160000 : truncate trailing blanks on TXT output lines
-$gVersion = 1.160000;
+# 1.170000 : Handle tables with L type columns
+$gVersion = 1.170000;
 
 
 # no CPAN packages used
@@ -529,6 +530,8 @@ else {
       if ($field2[1] eq "H"){
          $recsize += 2;
          $relrec = 2 if $field2[0] eq "Relrec";
+      } elsif ($field2[1] eq "L"){
+         $recsize += 4;
       }
       else {
          $size1 = substr($field2[1],1);                   # extract field size
