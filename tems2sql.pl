@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.29000;
+$gVersion = 1.30000;
 
 
 # no CPAN packages used
@@ -536,7 +536,6 @@ foreach $oneline (@kib_data)
       $col[$coli] = $colname;
       $colx{$colname} = $coli;
       $coldtyp[$coli] = $dtype;
-
       $colutf8[$coli] = 0;
       if (substr($dtype,0,3) eq 'F8U' || substr($dtype,0,3) eq 'V8U') {$colutf8[$coli] = 1;}
       $dtypx{$dtype} = '' if !defined($dtypx{$dtype});
@@ -850,6 +849,7 @@ elsif ($opt_val == 1) {
 }
 
 TOP: while ($recpos < $qa1size) {
+#$DB::single=2;
 #$DB::single=2 if $recpos >= 132328;
    seek(QA,$recpos,0);                                 # position file for reading
    $crecpos = $recpos;                                 # current record file position
@@ -951,7 +951,9 @@ TOP: while ($recpos < $qa1size) {
       $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
       die "unexpected size difference" if $num != $recsize;
       seek(QA,$recpos,0);                                 # re-position file for reading
+      $crecpos = $recpos;                                 # set current position
       $recpos += $recsize;                                # calculate position of next record
+      seek(QA,$recpos,0);                                 # re-position file for reading
       if ($del == 0) {                                    # deleted record
          next TOP if $opt_ee == 1;                        # only deleted records wanted
       }
@@ -1381,3 +1383,4 @@ exit;
 # 1.290000 : Add -ref reference output to help identify database broken cases
 #          : Add -skip to skip over database broken sections
 #          : Add -varyrec to handle zome z/OS cases
+# 1.300000 : Correct length calculation in none z/OS case
