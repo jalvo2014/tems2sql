@@ -30,8 +30,9 @@
 # 0.800000 : handle Relrec case and ignore I type table definitions needed for TSITSTSH
 # 0.850000 : handle Relrec case better and figure out tablename in more cases
 # 0.850000 : handle -h and absent -l better
+# 0.900000 : add -sx and -si and -v controls
 
-$gVersion = 0.850000;
+$gVersion = 0.900000;
 
 # $DB::single=2;   # remember debug breakpoint
 
@@ -46,18 +47,24 @@ $gWin = (-e "C:/") ? 1 : 0;       # determine Windows versus Linux/Unix for deta
 GetOptions(
            'h' => \ my $opt_h,
            'l' => \ my $opt_l,
+           'v' => \ my $opt_v,
            'e' => \ my $opt_e,
            'qib' => \ my $opt_qib,
            's=s' => \my $opt_s,
+           'sx=s' => \my $opt_sx,
+           'si=s' => \my $opt_si,
            't=s' => \my $opt_table,
            'x=s' => \my @opt_excl
           );
 
 if (!$opt_h) {$opt_h=0;}                            # help flag
-if (!$opt_l) {$opt_l=0;}                            # line number
+if (!$opt_l) {$opt_l=0;}                            # line number prefix
+if (!$opt_v) {$opt_v=0;}                            # TSV output
 if (!$opt_e) {$opt_e=0;}                            # show deleted flag
 if (!$opt_qib) {$opt_qib=0;}                        # include QIB Columns
 if (!$opt_s) {$opt_s="";}                           # show key
+if (!$opt_sx) {$opt_sx="";}                         # show key exclude file
+if (!$opt_si) {$opt_si="";}                         # show key include file
 if (!$opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
 
@@ -87,6 +94,60 @@ else {
 
 &GiveHelp if ( $opt_h );           # print help and exit
 
+if ($opt_sx ne "" && $opt_si ne "") {
+   die("Both -sx and -si specified - only one allowed\n");
+}
+
+if ($opt_sx ne "" && $opt_s eq "") {
+   die("Showkey exclude $opt_sx specified but -s is required and not specified\n");
+}
+
+if ($opt_si ne "" && $opt_s eq "") {
+   die("Showkey include $opt_si specified but -s is required and not specified\n");
+}
+
+if ($opt_l == 1 && $opt_v == 1) {
+   die("Both -l and -v specified\n");
+}
+
+
+my %show_exclude;
+
+if ($opt_sx ne "") {
+   open(KSX, "< $opt_sx") || die("Could not open sx $opt_sx\n");
+   @ksx_data = <KSX>;
+   close(KSX);
+
+   @words = ();
+
+   foreach $oneline (@ksx_data) {
+      chop $oneline;
+      $oneline =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
+      next if $oneline eq '';
+      $show_exclude{$oneline} = 1;
+   }
+
+}
+
+my %show_include;
+
+if ($opt_si ne "") {
+   open(KSI, "< $opt_si") || die("Could not open si $opt_si\n");
+   @ksi_data = <KSI>;
+   close(KSI);
+
+   @words = ();
+
+   foreach $oneline (@ksi_data) {
+      chop $oneline;
+      $oneline =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
+      next if $oneline eq '';                    # ignore blanks
+      $show_include{$oneline} = 1;
+   }
+
+}
+
+
 # (1) determine the table name involved from the input parameter or from -t option
 #
 $qa1fn =~ s/\\/\//g;
@@ -109,7 +170,7 @@ if ($opt_table ne "") {
 # example line from catalog
 # TO4SRV   TNODESAV                                                VSAM.QA1DNSAV   KFAIBLOC                YKFAIBINSKFAIBDELKFAIBUPD
 
-open(KIB, "< $kibfn") || die("Could not open $kibfn\n");
+open(KIB, "< $kibfn") || die("Could not open kib $kibfn\n");
 @kib_data = <KIB>;
 close(KIB);
 
@@ -272,7 +333,7 @@ my $relrec = 0;     # handle relrec cases
 
 $qa1size = -s  $qa1fn;                                 # file size in bytes
 
-open(QA, "$qa1fn") || die("Could not open $qa1fn\n");  # reading in binary
+open(QA, "$qa1fn") || die("Could not open qa1 $qa1fn\n");  # reading in binary
 binmode(QA);     # read QA1 file in buffered binary mode
 
 # get first integer
@@ -349,7 +410,7 @@ else {
 }
 
 $l = 0;               # track progress through data dump - helps debugging
-$cnt = 1;             # count of output SQL statements
+$cnt = 0;             # count of output SQL statements
 my $cpydata;          # column data
 my $lpre;             # output listing prefix
 my $del;              # deletion flag
@@ -357,6 +418,28 @@ my $s;
 my @exwords;          # exclude words
 my $showkey;          # header attribute
 my $eof;              # zos check of end of file
+my $quotech = "'";
+
+if ($opt_v == 1) {                                    # TSV output, emit header line
+   $quotech = '"';
+   $insql = "";
+   if ($opt_s ne "") {
+      $insql .= "ShowKey\t";
+   }
+   if ($opt_e == 1) {
+      $insql .= "Delete\t";
+   }
+   # column names
+   for ($i = 0; $i <= $coli; $i++) {
+      $insql .= $col[$i];
+      if ($i < $coli) {
+         $insql .= "\t";
+      }
+   }
+   print $insql . "\n";                     # header line printed to standard output
+   ++$cnt;
+
+}
 
 TOP: while ($recpos < $qa1size) {
    seek(QA,$recpos,0);                                 # position file for reading
@@ -386,7 +469,7 @@ TOP: while ($recpos < $qa1size) {
       seek(QA,$recpos,0);                                 # re-position file for reading
       $recpos += $recsize;                                # calculate position of next record
       if ($del != 0) {                                    # deleted record
-         next if $opt_e == 0;
+         next TOP if $opt_e == 0;
       }
    }
    $num = read(QA,$buffer,$recsize,0);                 # read data record
@@ -396,22 +479,27 @@ TOP: while ($recpos < $qa1size) {
 
    $l++;                           # count logical records
 
+
+
    $showkey = "";
-   # data record found. Generate insert SQL which has this form:
-   # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
+   $insql = "";
+   if ($opt_v == 0) {
+      # data record found. Generate insert SQL which has this form:
+      # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
-   # create initial portion of SQL.
+      # create initial portion of SQL.
 
-   $insql = "INSERT INTO O4SRV." . $tablename . " (";
+      $insql = "INSERT INTO O4SRV." . $tablename . " (";
 
-   # column names
-   for ($i = 0; $i <= $coli; $i++) {
-      $insql .= $col[$i];
-      if ($i < $coli) {
-         $insql .= ", ";
+      # column names
+      for ($i = 0; $i <= $coli; $i++) {
+         $insql .= $col[$i];
+         if ($i < $coli) {
+            $insql .= ", ";
+         }
       }
+      $insql .= ") VALUES (";
    }
-   $insql .= ") VALUES (";
 
 
 
@@ -464,32 +552,74 @@ TOP: while ($recpos < $qa1size) {
            }
          }
       }
-      $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into doubled single quotes
 
       # if a show column is specified, record it now
 
       if ($opt_s eq $col[$i]) {
          $showkey = $cpydata;
+         if ($opt_sx ne "") {                               # if doing showkey excludes, ignore record if in include list
+            next TOP if defined $show_exclude{$showkey};
+         }
+         if ($opt_si ne "") {                               # if doing showkey include, ignore record if not in include list
+            next TOP if !defined $show_include{$showkey};
+         }
       }
 
-
-      $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
-      if ($i < $coli) {
-         $insql .= ", ";
+      if ($opt_v == 0) {
+         $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
+         $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
+         if ($i < $coli) {
+            $insql .= ", ";
+         }
+      }
+      else {                                        # for TSV style, emit just tab
+         if ($cpydata ne "") {
+            if (index($cpydata,"\"") == -1)  {
+               $insql .= $cpydata;                  # place into TSV prototype
+            }
+            else {
+               $cpydata =~ s/"/""/g;                   # convert embedded double quotes into two double quotes
+               $insql .= '"' . $cpydata . '"';         # place into TSV prototype
+            }
+         }
+         if ($i < $coli) {
+            $insql .= "\t";
+         }
       }
    }
-   $insql .= ");";
-   $cnt++;
 
-   # prepare line number/delete/showkey depending on options
-   $lpre = "";
-   if ($opt_l) {
-      $lpre = "[" . $l;
-      if ($del != 0) {$lpre .= "-deleted";}
-      if ($showkey ne "") {$lpre .= " " . $showkey;}
-      $lpre .=  "] ";
+   if ($opt_v == 0) {
+      $insql .= ");";
+
+      # prepare line number/delete/showkey depending on options
+      $lpre = "";
+      if ($opt_l) {
+         $lpre = "[" . $l;
+         if ($del != 0) {$lpre .= "-deleted";}
+         if ($showkey ne "") {$lpre .= " " . $showkey;}
+         $lpre .=  "] ";
+      }
+      $cnt++;
+      print $lpre . $insql . "\n";          # SQL printed to standard outout
    }
-   print $lpre . $insql . "\n";          # SQL printed to standard outout
+   else {                                   # TSV processing
+      $lpre = "";
+      if ($opt_s ne "") {
+         if ($showkey ne "") {
+            $lpre = $showkey . "\t";
+         }
+      }
+      if ($opt_e == 1) {
+         if ($del != 0) {
+            $lpre .= "D\t";
+         }
+         else {
+            $lpre .= "\t";
+         }
+      }
+      ++$cnt;
+      print $lpre . $insql . "\n";          # TSV data line standard outout
+   }
 }
 
 print STDERR "Wrote $cnt insert SQL statements for $tablename\n";
@@ -519,13 +649,17 @@ sub GiveHelp
   Options
     -h              Produce help message
     -l              show input line number
+    -v              Product tab delimited .txt file for Excel
     -e              include deleted lines
     -qib            include QIB columns
     -s key          show key value before INSERT SQL
+    -sx file        exclude rows where showkey contained in this file
+    -si file        include rows where showkey contained in this file
     -t table             specify table name
     -x key=value    exclude rows where column data starts with value
 
     -e and -s only have effect if -l show line number is present
+    -l and -v are mutually exclusive
 
   Examples:
     $0  $kibfn QA1DNSAV.DB > insert_nsav.sql
