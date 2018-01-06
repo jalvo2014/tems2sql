@@ -38,8 +38,9 @@
 # 1.000000 : Remove CPAN requirements
 # 1.050000 : Handle I2 and I4 type columns
 # 1.100000 : Handle tables with multiple show keys
+# 1.150000 : Index only and delete only added
 
-$gVersion = 1.050000;
+$gVersion = 1.150000;
 
 
 # no CPAN packages used
@@ -73,6 +74,8 @@ my $opt_h;               # help flag
 my $opt_l;               # line number prefix
 my $opt_v;               # CSV output
 my $opt_e;               # show deleted flag
+my $opt_ee;              # show only deleted flag
+my $opt_ix;              # output only index records
 my $opt_qib;             # include QIB Columns
 my $opt_sct;             # count of show keys collected
 my @opt_skey;            # show keys
@@ -99,6 +102,15 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-e") {
       shift(@ARGV);
       $opt_e = 1;
+   }
+   elsif ($ARGV[0] eq "-ee") {
+      shift(@ARGV);
+      $opt_e = 1;
+      $opt_ee = 1;
+   }
+   elsif ($ARGV[0] eq "-ix") {
+      shift(@ARGV);
+      $opt_ix = 1;
    }
    elsif ($ARGV[0] eq "-qib") {
       shift(@ARGV);
@@ -153,6 +165,8 @@ if (!$opt_h) {$opt_h=0;}                            # help flag
 if (!$opt_l) {$opt_l=0;}                            # line number prefix
 if (!$opt_v) {$opt_v=0;}                            # TSV output
 if (!$opt_e) {$opt_e=0;}                            # show deleted flag
+if (!$opt_ee) {$opt_ee=0;}                          # show only deleted flag
+if (!$opt_ix) {$opt_ix=0;}                          # output only index records
 if (!$opt_qib) {$opt_qib=0;}                        # include QIB Columns
 if (!@opt_skey) {@opt_skey=();}                     # show keys
 if (!$opt_sx) {$opt_sx="";}                         # show key exclude file
@@ -194,8 +208,12 @@ if ($opt_si ne "" && $#opt_skey == -1) {
    die("Showkey include $opt_si specified but -s is required and not specified\n");
 }
 
-if ($opt_l + $opt_v + $opt_txt > 1) {
-   die("Options -l and -v  and -txt are mutually exclusive\n");
+if ($opt_ix != 0  && $#opt_skey == -1) {
+   die("Index only output -ix specified but -s is required and not specified\n");
+}
+
+if ($opt_l + $opt_v + $opt_txt + $opt_ix> 1) {
+   die("Options -l and -v  and -txt and -ix are mutually exclusive\n");
 }
 
 
@@ -596,6 +614,9 @@ TOP: while ($recpos < $qa1size) {
       $recpos += 2;
       seek(QA,$recpos,0);                                 # re-position file for reading
       $recpos += $recsize;                                # calculate position of next record
+      if ($del == 0) {                                    # deleted record
+         next TOP if $opt_ee == 1;                        # only deleted records wanted
+      }
       if ($del != 0) {                                    # deleted record
          next TOP if $opt_e == 0;
       }
@@ -612,7 +633,7 @@ TOP: while ($recpos < $qa1size) {
    $showkey = "";
    $opt_sct = -1;
    $insql = "";
-   if ($opt_v == 0 && $opt_txt == 0) {
+   if ($opt_v == 0 && $opt_txt == 0 && $opt_ix == 0 ) {
       # data record found. Generate insert SQL which has this form:
       # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
@@ -785,6 +806,10 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          $insql .= $txtfrag{$s};
       }
    }
+   elsif ($opt_ix == 1) {                        # index only output
+      $lpre = "";
+      $insql = $showkey;
+   }
    else {                                   # TSV processing
       $insql .= ");";
 
@@ -830,8 +855,10 @@ sub GiveHelp
     -l              show input line number
     -v              Product tab delimited .txt file for Excel
     -txt            formatted text output
+    -ix             output only show key values
     -tc             columns to display on output [multiple allowed]
-    -e              include deleted rows
+    -e              include both normal and deleted rows
+    -ee             output only deleted rows
     -qib            include QIB columns
     -s key          show key value before INSERT SQL
     -sx file        exclude rows where showkey contained in this file
