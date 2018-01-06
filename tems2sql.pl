@@ -28,8 +28,10 @@
 # 0.700000 : handle z/OS repro files calculate recsize from cat table, add -qib option
 # 0.750000 : add != test in exclude
 # 0.800000 : handle Relrec case and ignore I type table definitions needed for TSITSTSH
+# 0.850000 : handle Relrec case better and figure out tablename in more cases
+# 0.850000 : handle -h and absent -l better
 
-$gVersion = 0.800000;
+$gVersion = 0.850000;
 
 # $DB::single=2;   # remember debug breakpoint
 
@@ -69,7 +71,7 @@ if ($gWin) {
    $ITM = $ENV{CANDLE_HOME} if ( defined($ENV{CANDLE_HOME}) );
    $ITM =~ s/\\/\//g;
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if !defined($ARGV[0]);
-   $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if $ARGV[0] eq ".";
+   $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if $kibfn eq ".";
    $qa1fn = "C:/temp/nsav/QA1DNSAV.DB"        if !defined($ARGV[1]);
 }
 
@@ -87,10 +89,17 @@ else {
 
 # (1) determine the table name involved from the input parameter or from -t option
 #
+$qa1fn =~ s/\\/\//g;
 if ($opt_table ne "") {
    $tablefn = $opt_table;
 } else {
-   @words = split("\\.",$qa1fn);
+   @words = split("\\/",$qa1fn);
+   if ($#words != -1) {
+      @words = split("\\.",$words[$#words]);
+   }
+   else {
+      @words = split("\\.",$qa1fn);
+   }
    $tablefn = $words[0];
 }
 
@@ -204,7 +213,7 @@ foreach $oneline (@kib_data)
       $ki = $postx{$key};
       $inpos = $words[3] . $words[4];
       @xpos = split(",",$inpos);
-      $ilen = substr($xpos[2],3);
+#     $ilen = substr($xpos[2],3);
       $ipos = substr($xpos[4],3);
       @ix = split(" ",$ki);
       foreach $kx (@ix)
@@ -327,12 +336,13 @@ else {
    for ($i=0;$i<$fcount;$i++) {
       @field2 = split(/,/,$fstr[$i]);                     # split field def by commas
       if ($field2[1] eq "H"){
-         $relrec = 2;
          $recsize += 2;
-         next;
+         $relrec = 2 if $field2[0] eq "Relrec";
       }
-      $size1 = substr($field2[1],1);                      # extract field size
-      $recsize += $size1;                                 # add to total record size
+      else {
+         $size1 = substr($field2[1],1);                   # extract field size
+         $recsize += $size1;                              # add to total record size
+      }
    }
 
    $recpos = $hdrsize+8;                                 # position of first record
@@ -385,6 +395,7 @@ TOP: while ($recpos < $qa1size) {
    # record is now in $buffer
 
    $l++;                           # count logical records
+
    $showkey = "";
    # data record found. Generate insert SQL which has this form:
    # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
@@ -407,6 +418,7 @@ TOP: while ($recpos < $qa1size) {
    # extract column data from buffer
    for ($i = 0; $i <= $coli; $i++) {
       $dpos = $colpos[$i];                       # starting point of data
+      $dpos += $relrec;                          # skip over relative record internal key
       $clen = $collen[$i];                       # length of data
       $firstc = substr($coldtyp[$i],0,1);        # if first character
       if ($firstc eq "V") {                      # is V...
@@ -417,7 +429,6 @@ TOP: while ($recpos < $qa1size) {
          }
          $dpos += 2;                                   # and adjust starting point of data
       }
-      $dpos += $relrec;                          # skip over relative record internal key
       $cpydata = substr($buffer,$dpos, $clen);   # first stab at data
       $firstc = substr($cpydata,0,1);            # if first character binary zero, set string to null
       if (ord($firstc) == 0) {
