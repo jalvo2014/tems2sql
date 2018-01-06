@@ -14,6 +14,7 @@
 #  jalvord@us.ibm.com
 #
 # tested on Windows Activestate 5.12.2
+# $DB::single=2;   # remember debug breakpoint
 #
 # puzzles - in tbe TNODESAV case, there are two columns which
 # map to the same position [NODE and ORIGINNODE]. It might
@@ -32,10 +33,10 @@
 # 0.850000 : handle -h and absent -l better
 # 0.900000 : add -sx and -si and -v controls
 # 0.930000 : add -txt and -tc options
+# 0.950000 : handle tables with names not beginning with I
 
-$gVersion = 0.930000;
+$gVersion = 0.950000;
 
-# $DB::single=2;   # remember debug breakpoint
 
 # CPAN packages used
 use Getopt::Long;                 # command line parsing
@@ -193,7 +194,7 @@ foreach $oneline (@kib_data)
    @words = split(" ",$oneline);
    if ($words[2] ne $testfn) {next;}
    $tablename = $words[1];
-   next if substr($tablename,0,1) ne "T";
+   next if substr($tablename,0,1) eq "I";
    last;
 }
 if ($tablename eq "") {die("kib catalog missing tablefn $testfn.\n");}
@@ -229,17 +230,18 @@ foreach $oneline (@kib_data)
    # State 2 - looking for relevant C - column entries
    elsif ($state == 2) {
       if ($firstc ne "C") {$state=3;redo;}
-      if ($words[1] ne $tablename) {next;}
-      $colname = $words[2];
+      $intable = substr($oneline,9,10);        # input table name
+      $intable =~ s/\s+$//;                    # strip trailing blanks
+      next if $intable ne $tablename;          # skip if not correct table name
+      $colname = substr($oneline,19,10);       # input column name
+      $colname =~ s/\s+$//;                 # strip trailing blanks
       if ($opt_qib == 0) {
          next if substr($colname,0,3) eq "QIB";  # QIB columns are virtual and no data in TEMS database file
       }
-      if (length($words[3]) > 10) {
-         $words[4] = substr($words[3],10);
-         $words[3] = substr($words[3],0,10);
-      }
-      $dtype = $words[3];
-      $dpos = substr($words[4],8);
+      $dtype   = substr($oneline,57,10);       # input data type
+      $dtype   =~ s/\s+$//;                  # strip trailing blanks
+      $dpos    = substr($oneline,75,10);       # input data position
+      $dpos    =~ s/\s+$//;                  # strip trailing blanks
       $coli++;
       $col[$coli] = $colname;
       $colx{$colname} = $coli;
@@ -310,6 +312,8 @@ if ($opt_txt == 1) {
    }
 
 }
+
+die "No columns found for table $tablefn\n" if $coli == -1;
 
 # run through fields and record total length
 # needed for z/OS Table repro
