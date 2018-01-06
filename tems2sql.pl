@@ -39,8 +39,8 @@
 # 1.050000 : Handle I2 and I4 type columns
 # 1.100000 : Handle tables with multiple show keys
 # 1.150000 : Index only and delete only added
-
-$gVersion = 1.150000;
+# 1.160000 : truncate trailing blanks on TXT output lines
+$gVersion = 1.160000;
 
 
 # no CPAN packages used
@@ -805,6 +805,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       foreach $s (@opt_tc) {                     # look at each requested column
          $insql .= $txtfrag{$s};
       }
+      $insql =~ s/(\s+$)//g;                     # remove trailing white space
    }
    elsif ($opt_ix == 1) {                        # index only output
       $lpre = "";
