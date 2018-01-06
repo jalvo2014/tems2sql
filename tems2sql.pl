@@ -34,32 +34,116 @@
 # 0.900000 : add -sx and -si and -v controls
 # 0.930000 : add -txt and -tc options
 # 0.950000 : handle tables with names not beginning with I
+# 0.970000 : handle excludes of null values
+# 1.000000 : Remove CPAN requirements
 
-$gVersion = 0.950000;
+$gVersion = 1.000000;
 
 
-# CPAN packages used
-use Getopt::Long;                 # command line parsing
-use Convert::EBCDIC;              # EBCDIC handling
+# no CPAN packages used
 
-our $translator = new Convert::EBCDIC($Convert::EBCDIC::ccsid1047);
+# following table is used in EBCDIC to ASCII conversion using ccsid 1047 - valid for z/OS
+# adapted from CPAN module Convert::EBCDIC;
+# the values are recorded in octol notation.
+$ccsid1047 =
+'\000\001\002\003\234\011\206\177\227\215\216\013\014\015\016\017' .
+'\020\021\022\023\235\012\010\207\030\031\222\217\034\035\036\037' .
+'\200\201\202\203\204\205\027\033\210\211\212\213\214\005\006\007' .
+'\220\221\026\223\224\225\226\004\230\231\232\233\024\025\236\032' .
+'\040\240\342\344\340\341\343\345\347\361\242\056\074\050\053\174' .
+'\046\351\352\353\350\355\356\357\354\337\041\044\052\051\073\136' .
+'\055\057\302\304\300\301\303\305\307\321\246\054\045\137\076\077' .
+'\370\311\312\313\310\315\316\317\314\140\072\043\100\047\075\042' .
+'\330\141\142\143\144\145\146\147\150\151\253\273\360\375\376\261' .
+'\260\152\153\154\155\156\157\160\161\162\252\272\346\270\306\244' .
+'\265\176\163\164\165\166\167\170\171\172\241\277\320\133\336\256' .
+'\254\243\245\267\251\247\266\274\275\276\335\250\257\135\264\327' .
+'\173\101\102\103\104\105\106\107\110\111\255\364\366\362\363\365' .
+'\175\112\113\114\115\116\117\120\121\122\271\373\374\371\372\377' .
+'\134\367\123\124\125\126\127\130\131\132\262\324\326\322\323\325' .
+'\060\061\062\063\064\065\066\067\070\071\263\333\334\331\332\237' ;
 
 $gWin = (-e "C:/") ? 1 : 0;       # determine Windows versus Linux/Unix for detail settings
 
-GetOptions(
-           'h' => \ my $opt_h,
-           'l' => \ my $opt_l,
-           'v' => \ my $opt_v,
-           'e' => \ my $opt_e,
-           'qib' => \ my $opt_qib,
-           's=s' => \my $opt_s,
-           'sx=s' => \my $opt_sx,
-           'si=s' => \my $opt_si,
-           't=s' => \my $opt_table,
-           'x=s' => \my @opt_excl,
-           'txt' => \ my $opt_txt,
-           'tc=s' => \ my @opt_tc,
-          );
+# Work through the command line options
+
+my $opt_h;               # help flag
+my $opt_l;               # line number prefix
+my $opt_v;               # CSV output
+my $opt_e;               # show deleted flag
+my $opt_qib;             # include QIB Columns
+my $opt_s;               # show key
+my $opt_sx;              # show key exclude file
+my $opt_si;              # show key include file
+my $opt_table;           # set tablename
+my @opt_excl = ();       # set excludes to null
+my $opt_txt;             # text output
+my @opt_tc = ();         # set text columns to null
+my $opt_test;
+
+while (@ARGV) {
+   if ($ARGV[0] eq "-h") {
+      &GiveHelp;                        # print help and exit
+   }
+   elsif ($ARGV[0] eq "-l") {
+      shift(@ARGV);
+      $opt_l = 1;
+   }
+   elsif ($ARGV[0] eq "-v") {
+      shift(@ARGV);
+      $opt_v = 1;
+   }
+   elsif ($ARGV[0] eq "-e") {
+      shift(@ARGV);
+      $opt_e = 1;
+   }
+   elsif ($ARGV[0] eq "-qib") {
+      shift(@ARGV);
+      $opt_qib = 1;
+   }
+   elsif ($ARGV[0] eq "-s") {
+      shift(@ARGV);
+      $opt_s = shift(@ARGV);
+      die "option -s with no following column name\n" if !defined $opt_s;
+   }
+   elsif ($ARGV[0] eq "-sx") {
+      shift(@ARGV);
+      $opt_sx = shift(@ARGV);
+      die "option -sx with no following filename of includes\n" if !defined $opt_sx;
+   }
+   elsif ($ARGV[0] eq "-si") {
+      shift(@ARGV);
+      $opt_si = shift(@ARGV);
+      die "option -si with no following filename of includes\n" if !defined $opt_si;
+   }
+   elsif ($ARGV[0] eq "-t") {
+      shift(@ARGV);
+      $opt_table = shift(@ARGV);
+      die "option -t with no following table name\n" if !defined $opt_table;
+   }
+   elsif ($ARGV[0] eq "-x") {
+      shift(@ARGV);
+      $opt_test = shift(@ARGV);
+      die "option -x with no following exclude directive\n" if !defined $opt_test;
+      push(@opt_excl,$opt_test);
+   }
+   elsif ($ARGV[0] eq "-txt") {
+      shift(@ARGV);
+      $opt_txt = 1;
+   }
+   elsif ($ARGV[0] eq "-tc") {
+      shift(@ARGV);
+      $opt_test = shift(@ARGV);
+      die "option -tc with no following column name\n" if !defined $opt_test;
+      push(@opt_tc,$opt_test);
+   }
+   else {
+      last;
+   }
+
+}
+$kibfn = $ARGV[0] if defined($ARGV[0]);
+$qa1fn = $ARGV[1] if defined($ARGV[1]);
 
 if (!$opt_h) {$opt_h=0;}                            # help flag
 if (!$opt_l) {$opt_l=0;}                            # line number prefix
@@ -73,10 +157,6 @@ if (!$opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
 if (!$opt_txt) {$opt_txt=0;}                        # text output
 if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
-
-
-$kibfn = $ARGV[0] if defined($ARGV[0]);
-$qa1fn = $ARGV[1] if defined($ARGV[1]);
 
 # If running on Windows initialize for Windows.
 if ($gWin) {
@@ -96,9 +176,6 @@ else {
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"    if !defined($ARGV[0]);
    $qa1fn = "/tmp/QA1DNSAV.DB"             if !defined($ARGV[1]);
 }
-
-
-&GiveHelp if ( $opt_h );           # print help and exit
 
 if ($opt_sx ne "" && $opt_si ne "") {
    die("Both -sx and -si specified - only one allowed\n");
@@ -574,7 +651,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       # Some z/OS columns are not in ASCII. For those ones convert to ascii
 
       if ($zos == 1 && $colutf8[$i] == 0 ) {
-         $cpydata = $translator->toascii($cpydata);
+         eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/';
       }
 
       $cpydata =~ s/(^\s+|\s+$)//g;              # remove leading and trailing white space
@@ -584,6 +661,9 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       foreach $s (@opt_excl) {
          if (index($s,"!=") > 0) {
             @exwords = split('!=',$s);
+            if ($exwords[1] eq "''"){
+               next if $cpydata ne "";
+            }
             if ($col[$i] eq $exwords[0]) {
                if ($exwords[1] ne substr($cpydata,0,length($exwords[1]))){
                   next TOP;
@@ -592,6 +672,9 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          }
          else {
             @exwords = split('=',$s);
+            if ($exwords[1] eq "''"){
+               next if $cpydata eq "";
+            }
             if ($col[$i] eq $exwords[0]) {
                if ($exwords[1] eq substr($cpydata,0,length($exwords[1]))){
                   next TOP;
@@ -717,7 +800,7 @@ sub GiveHelp
     -v              Product tab delimited .txt file for Excel
     -txt            formatted text output
     -tc             columns to display on output [multiple allowed]
-    -e              include deleted lines
+    -e              include deleted rows
     -qib            include QIB columns
     -s key          show key value before INSERT SQL
     -sx file        exclude rows where showkey contained in this file
