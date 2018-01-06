@@ -18,10 +18,11 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.34000;
+$gVersion = 1.35000;
 
 
 # no CPAN packages used
+#use Data::Dumper;               # debug only
 
 # following table is used in EBCDIC to ASCII conversion using ccsid 1047 - valid for z/OS
 # adapted from CPAN module Convert::EBCDIC;
@@ -54,6 +55,7 @@ my $opt_l;               # line number prefix
 my $opt_v;               # CSV output
 my $opt_e;               # show deleted flag
 my $opt_ee;              # show only deleted flag
+my $opt_last;            # show only deleted flag and show only most recent delete same key
 my $opt_future;             # monitor for LSTDATE beyond given time
 my $opt_future_date;        # When 1, a future date was found
 my $opt_future_date_count = 0; #count of future dates
@@ -179,6 +181,10 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_e = 1;
       $opt_ee = 1;
+   }
+   elsif ($ARGV[0] eq "-last") {
+      shift(@ARGV);
+      $opt_last = 1;
    }
    elsif ($ARGV[0] eq "-future") {
       shift(@ARGV);
@@ -315,6 +321,7 @@ if (!defined $opt_l) {$opt_l=0;}                            # line number prefix
 if (!defined $opt_v) {$opt_v=0;}                            # TSV output
 if (!defined $opt_e) {$opt_e=0;}                            # show deleted flag
 if (!defined $opt_ee) {$opt_ee=0;}                          # show only deleted flag
+if (!defined $opt_last) {$opt_last=0;}                      # record only latest deleted record by key
 if (!defined $opt_ix) {$opt_ix=0;}                          # output only index records
 if (!defined $opt_ref) {$opt_ref=0;}                        # output reference lines
 if (!defined $opt_qib) {$opt_qib=0;}                        # include QIB Columns
@@ -674,11 +681,15 @@ my $recpos = 0;                                        # pointer to file positio
 my $crecpos = 0;                                       # pointer to current record file position
 my $relrec = 0;     # handle relrec cases
 
+my %lastshow = ();    # hash to record  showkey=>logical_line number
+my $lastee = 1;       # When -last set and -ee, records first pass second pass condition
+
 $qa1size = -s  $qa1fn;                                 # file size in bytes
 
 open(QA, "$qa1fn") || die("Could not open qa1 $qa1fn\n");  # reading in binary
 binmode(QA);     # read QA1 file in buffered binary mode
 
+RESTART:        # used during -ee and -last processing
 # get first integer
 seek(QA,$recpos,0);
 $num = read(QA,$buffer,2,0);
@@ -861,7 +872,6 @@ elsif ($opt_val == 1) {
 }
 
 TOP: while ($recpos < $qa1size) {
-#$DB::single=2;
 #$DB::single=2 if $recpos >= 132328;
    seek(QA,$recpos,0);                                 # position file for reading
    $crecpos = $recpos;                                 # current record file position
@@ -1290,8 +1300,23 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          $lpre .=  "] ";
       }
    }
+   if (($opt_ee) and ($opt_last)) {
+      if ($lastee == 1) {
+         $lastshow{$showkey} = $l;
+         next;
+      } else {
+         next TOP if $lastshow{$showkey} != $l;
+      }
+   }
    ++$cnt;
    print $lpre . $insql . "\n";          # SQL printed to standard outout
+}
+if (($opt_ee) and ($opt_last) and ($lastee == 1)) {
+   $lastee = 2;
+   $recpos = 0;                                        # pointer to file position
+   $crecpos = 0;                                       # pointer to current record file position
+   $relrec = 0;     # handle relrec cases
+   goto RESTART;
 }
 
 print STDERR "Wrote $cnt lines for $tablename\n";
@@ -1404,3 +1429,4 @@ exit;
 # 1.320000 : on -o outputs, upper case extension. Needed for non-Windows environments
 # 1.330000 : add -tr to clarify text attributes with embedded tabs, carriage returns and line feeds
 # 1.340000 : Add -endian option to show type of distributed QA1 file - big endian or little endian
+# 1.350000 : Add -last which with -ee will only output the most recent deleted object
