@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.26000;
+$gVersion = 1.27000;
 
 
 # no CPAN packages used
@@ -79,6 +79,7 @@ my @favColNames = ();         # set to null
 my $DEBUG = "YES";
 my $opt_o;               # when defined, set output controls
 my $opt_ofn;             # output filename
+my $opt_z = 0;      # identify zOS reproed VSAM files
 
 %hQA1names = (
 TNODELST => 'QA1CNODL,LSTDATE,NODE,NODELIST,NODETYPE',
@@ -146,6 +147,7 @@ else {
 
 
 while (@ARGV) {
+#$DB::single=2;
    if ($ARGV[0] eq "-h") {
       &GiveHelp;                        # print help and exit
    }
@@ -214,6 +216,14 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_txt = 1;
    }
+   elsif ($ARGV[0] eq "-z") {
+      shift(@ARGV);
+      $opt_z = 1;
+   }
+   elsif ($ARGV[0] eq "-v") {
+      shift(@ARGV);
+      $opt_v = 1;
+   }
    elsif ($ARGV[0] eq "-val") {
       shift(@ARGV);
       $opt_val = 1;
@@ -269,24 +279,24 @@ die "QA1 file missing from command line\n" if !defined  $ARGV[1];
 die "Catalog file missing\n" unless -e $ARGV[0];
 die "QA1 file missing\n" unless -e $ARGV[1];
 
-if (!$opt_h) {$opt_h=0;}                            # help flag
-if (!$opt_d) {undef $DEBUG;}                        # debug mode is turned off
-if (!$opt_l) {$opt_l=0;}                            # line number prefix
-if (!$opt_v) {$opt_v=0;}                            # TSV output
-if (!$opt_e) {$opt_e=0;}                            # show deleted flag
-if (!$opt_ee) {$opt_ee=0;}                          # show only deleted flag
-if (!$opt_ix) {$opt_ix=0;}                          # output only index records
-if (!$opt_qib) {$opt_qib=0;}                        # include QIB Columns
+if (!defined $opt_h) {$opt_h=0;}                            # help flag
+if (!defined $opt_d) {undef $DEBUG;}                        # debug mode is turned off
+if (!defined $opt_l) {$opt_l=0;}                            # line number prefix
+if (!defined $opt_v) {$opt_v=0;}                            # TSV output
+if (!defined $opt_e) {$opt_e=0;}                            # show deleted flag
+if (!defined $opt_ee) {$opt_ee=0;}                          # show only deleted flag
+if (!defined $opt_ix) {$opt_ix=0;}                          # output only index records
+if (!defined $opt_qib) {$opt_qib=0;}                        # include QIB Columns
 if (!@opt_skey) {@opt_skey=();}                     # show keys
-if (!$opt_sx) {$opt_sx="";}                         # show key exclude file
-if (!$opt_si) {$opt_si="";}                         # show key include file
-if (!$opt_table) {$opt_table="";}                   # set tablename
+if (!defined $opt_sx) {$opt_sx="";}                         # show key exclude file
+if (!defined $opt_si) {$opt_si="";}                         # show key include file
+if (!defined $opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
-if (!$opt_txt) {$opt_txt=0;}                        # text output
-if (!$opt_val)  {$opt_val=0;}                         # text output
-if (!$opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
+if (!defined $opt_txt) {$opt_txt=0;}                        # text output
+if (!defined $opt_val)  {$opt_val=0;}                       # text output
+if (!defined $opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
 if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
-if (!$opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
+if (!defined $opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
 
 my $got_qibclassid = 0;                             # when 1 a QIBCLASSID was found
 
@@ -623,7 +633,6 @@ my $recsize;        # calculated record size
 my $fcount = 0;     # count of field definitions
 my $fields;
 my $qa_endian = 0;  # remember endian type \ 1=little 0=big
-my $zos = 0;        # assume not z/OS repro
 my $recpos = 0;                                        # pointer to file position
 my $relrec = 0;     # handle relrec cases
 
@@ -644,13 +653,23 @@ $num = read(QA,$buffer,2,0);
 die "unexpected size difference" if $num != 2;
 $test2 = unpack("n",$buffer);
 
-$zos = ($test0 != 0 && $test2 != 0);
-$qa_endian = ($zos == 0 && $test2 == 0) ? 1 : 0;
+if ($opt_z == 1) {
+   $qa_endian = 1;
+} else {
+   $qa_endian = 1 if $test2 == 0;
+}
 
-# zOS repro dump is fixed length and the catalog calculation is sufficient
-if ($zos == 1) {
-   $recsize = $catsize;
-   $recpos = 0;
+# most zOS repro dump is fixed length and the catalog calculation is sufficient
+# if this a Relrec type, starts with zero and then a two byte sequence number
+if ($opt_z == 1) {
+   if (($test0 == 0) && ($test2 == 1)) {
+     $recsize = $catsize+2;
+     $recpos = 2;
+     $relrec = 2;
+   } else {
+     $recsize = $catsize;
+     $recpos = 0;
+   }
 }
 
 # distribured .DB filee - use the embedded field definitions. There is a size
@@ -765,6 +784,8 @@ elsif ($opt_txt == 1) {
             $uLen = $opt_tlim;
             $len = $opt_tlim;
          }
+      } else {
+        $uLen = $len;
       }
 
       $fmtStr = "%-" . $len . "s ";
@@ -799,7 +820,7 @@ elsif ($opt_val == 1) {
 
 TOP: while ($recpos < $qa1size) {
    seek(QA,$recpos,0);                                 # position file for reading
-   if ($zos == 1) {
+   if ($opt_z == 1) {
       $del = 0;                                        # no detection of deleted records in zOS
       $num = read(QA,$buffer,4,0);                     # read 2 bytes
       die "unexpected size difference" if $num != 4;
@@ -837,6 +858,7 @@ TOP: while ($recpos < $qa1size) {
    # record is now in $buffer
 
    $l++;                           # count logical records
+#   print "working on line $l\n";  ##debug
    $showkey = "";
    $opt_sct = -1;
    $insql = "";
@@ -867,7 +889,8 @@ $cvalue = "";
 
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
-#if ($col[$i] eq "PDT") {
+#if ($col[$i] eq 'KEY') {
+#$DB::single=2;
 #}
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
@@ -888,7 +911,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       } else {
          $firstc = substr($coldtyp[$i],0,1);        # if first character
          if ($firstc eq "V") {                      # is V...
-            if ($qa_endian == 0) {                  # big_endian size
+            if ($qa_endian == 1) {                  # big_endian size
                $clen = unpack("n",substr($buffer,$dpos,2));
             } else {                                # else little endian size
                $clen = unpack("v",substr($buffer,$dpos,2));  # pick out length
@@ -904,7 +927,8 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
 
          # Some z/OS columns are not in ASCII. For those ones convert to ascii
 
-         if ($zos == 1 && $colutf8[$i] == 0 ) {
+         if ($opt_z == 1 && $colutf8[$i] == 0 ) {
+            $cpydata =~ s/(\x40+$)//g;                 # remove trailing ebcdic blanks
             eval '$cpydata =~ tr/\000-\377/' . $ccsid1047 . '/';
          }
 
@@ -1054,9 +1078,11 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
                $fmtCol = "%-" . $len . "s";
             } else {
                $fmtCol = "%." . $opt_tlim . "s";
-               $extra_space = " ";
             }
+         } else {
+            $fmtCol = "%s";
          }
+
 
          $insql .= sprintf $fmtCol, $txtfrag{$s}; # beh:END
          $insql .= $extra_space;
@@ -1188,3 +1214,6 @@ exit;
 # 1.250000 : -va option to create validate files
 #            add temsval.pl to package
 # 1.260000 : -nogal  to not ignore TOBJACCL and AND ACTIVATION columns
+# 1.270000 : -z to identify z/OS VSAM REPROed to sequential files
+#            auto identification did not work
+#            -tlim 0 did not work
