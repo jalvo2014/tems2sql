@@ -26,8 +26,9 @@
 #            record is deleted
 # 0.600000 : handle fields with embedded single quotes
 # 0.700000 : handle z/OS repro files calculate recsize from cat table, add -qib option
+# 0.750000 : add != test in exclude
 
-$gVersion = 0.700000;
+$gVersion = 0.750000;
 
 # $DB::single=2;   # remember debug breakpoint
 
@@ -153,6 +154,10 @@ foreach $oneline (@kib_data)
       $colname = $words[2];
       if ($opt_qib == 0) {
          next if substr($colname,0,3) eq "QIB";  # QIB columns are virtual and no data in TEMS database file
+      }
+      if (length($words[3]) > 10) {
+         $words[4] = substr($words[3],10);
+         $words[3] = substr($words[3],0,10);
       }
       $dtype = $words[3];
       $dpos = substr($words[4],8);
@@ -422,11 +427,21 @@ TOP: while ($recpos < $qa1size) {
       # if there are excludes and this data matches, then skip this one
 
       foreach $s (@opt_excl) {
-         @exwords = split('=',$s);
-         if ($col[$i] eq $exwords[0]) {
-            if ($exwords[1] eq substr($cpydata,0,length($exwords[1]))){
-               next TOP;
-            }
+         if (index($s,"!=") > 0) {
+            @exwords = split('!=',$s);
+            if ($col[$i] eq $exwords[0]) {
+               if ($exwords[1] ne substr($cpydata,0,length($exwords[1]))){
+                  next TOP;
+               }
+           }
+         }
+         else {
+            @exwords = split('=',$s);
+            if ($col[$i] eq $exwords[0]) {
+               if ($exwords[1] eq substr($cpydata,0,length($exwords[1]))){
+                  next TOP;
+               }
+           }
          }
       }
       $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into doubled single quotes
