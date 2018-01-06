@@ -31,8 +31,9 @@
 # 0.850000 : handle Relrec case better and figure out tablename in more cases
 # 0.850000 : handle -h and absent -l better
 # 0.900000 : add -sx and -si and -v controls
+# 0.930000 : add -txt and -tc options
 
-$gVersion = 0.900000;
+$gVersion = 0.930000;
 
 # $DB::single=2;   # remember debug breakpoint
 
@@ -54,7 +55,9 @@ GetOptions(
            'sx=s' => \my $opt_sx,
            'si=s' => \my $opt_si,
            't=s' => \my $opt_table,
-           'x=s' => \my @opt_excl
+           'x=s' => \my @opt_excl,
+           'txt' => \ my $opt_txt,
+           'tc=s' => \ my @opt_tc,
           );
 
 if (!$opt_h) {$opt_h=0;}                            # help flag
@@ -67,6 +70,8 @@ if (!$opt_sx) {$opt_sx="";}                         # show key exclude file
 if (!$opt_si) {$opt_si="";}                         # show key include file
 if (!$opt_table) {$opt_table="";}                   # set tablename
 if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
+if (!$opt_txt) {$opt_txt=0;}                        # text output
+if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
 
 
 $kibfn = $ARGV[0] if defined($ARGV[0]);
@@ -96,6 +101,7 @@ else {
 
 if ($opt_sx ne "" && $opt_si ne "") {
    die("Both -sx and -si specified - only one allowed\n");
+
 }
 
 if ($opt_sx ne "" && $opt_s eq "") {
@@ -106,8 +112,8 @@ if ($opt_si ne "" && $opt_s eq "") {
    die("Showkey include $opt_si specified but -s is required and not specified\n");
 }
 
-if ($opt_l == 1 && $opt_v == 1) {
-   die("Both -l and -v specified\n");
+if ($opt_l + $opt_v + $opt_txt > 1) {
+   die("Options -l and -v  and -txt are mutually exclusive\n");
 }
 
 
@@ -198,6 +204,7 @@ if ($tablename eq "") {die("kib catalog missing tablefn $testfn.\n");}
  $coli = -1;       # count of columns for the tablename
  @col = ();        # array of column names
  %colx = ();       # associative array column name to index
+ $cx = 0;          # index to column data
  @coldtyp = ();    # array of data types
  @colutf8 = ();    # array of UTF-8 values
  @colpost = ();    # array of data positions
@@ -284,7 +291,27 @@ foreach $oneline (@kib_data)
    }
 }
 
-# run through fields and record end pointtotal length
+
+# now column data has been corrected, if txt style, validate the columns
+if ($opt_txt == 1) {
+   my $tc_errs = 0;
+   my $tc_cnt = 0;
+   foreach $s (@opt_tc) {                   # look at each requested column
+     $tc_cnt++;
+      next if defined $colx{$s};
+      print STDERR "-tc option $s is an unknown column.\n";
+      $tc_errs++;
+   }
+   if ($tc_errs > 0) {
+      die "-tc errors, correct and retry\n";
+   }
+   if ($tc_cnt == 0) {
+      die "-txt with no -tc options supplied, correct and retry\n";
+   }
+
+}
+
+# run through fields and record total length
 # needed for z/OS Table repro
 my $catsize = 0;
 my $highpos = -1;
@@ -419,6 +446,7 @@ my @exwords;          # exclude words
 my $showkey;          # header attribute
 my $eof;              # zos check of end of file
 my $quotech = "'";
+my %txtfrag = ();     # associative array for txt output by column
 
 if ($opt_v == 1) {                                    # TSV output, emit header line
    $quotech = '"';
@@ -435,6 +463,21 @@ if ($opt_v == 1) {                                    # TSV output, emit header 
       if ($i < $coli) {
          $insql .= "\t";
       }
+   }
+   print $insql . "\n";                     # header line printed to standard output
+   ++$cnt;
+
+}
+elsif ($opt_txt == 1) {
+my $len;
+my $pos = 0;
+   $insql = "*";
+   foreach $s (@opt_tc) {                   # look at each requested column
+      $cx = $colx{$s};                      # index to column data
+      $len = $collen[$cx];
+      $len -= 2 if $coldtyp[$cx] eq "V";
+      $insql .= $s . "@" . $pos . "," . $len . " ";
+      $pos += $len + 1;
    }
    print $insql . "\n";                     # header line printed to standard output
    ++$cnt;
@@ -483,7 +526,7 @@ TOP: while ($recpos < $qa1size) {
 
    $showkey = "";
    $insql = "";
-   if ($opt_v == 0) {
+   if ($opt_v == 0 && $opt_txt == 0) {
       # data record found. Generate insert SQL which has this form:
       # INSERT INTO O4SRV.TNODESTS (O4ONLINE, LSTUSRPRF, NODE, THRUNODE ) VALUES ( "D", "cmw", "xxxxx", "" );
 
@@ -504,7 +547,7 @@ TOP: while ($recpos < $qa1size) {
 
 
    # extract column data from buffer
-   for ($i = 0; $i <= $coli; $i++) {
+COLUMN: for ($i = 0; $i <= $coli; $i++) {
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
       $clen = $collen[$i];                       # length of data
@@ -565,14 +608,7 @@ TOP: while ($recpos < $qa1size) {
          }
       }
 
-      if ($opt_v == 0) {
-         $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
-         $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
-         if ($i < $coli) {
-            $insql .= ", ";
-         }
-      }
-      else {                                        # for TSV style, emit just tab
+      if ($opt_v == 1) {                            # for TSV style, emit just tab
          if ($cpydata ne "") {
             if (index($cpydata,"\"") == -1)  {
                $insql .= $cpydata;                  # place into TSV prototype
@@ -586,23 +622,28 @@ TOP: while ($recpos < $qa1size) {
             $insql .= "\t";
          }
       }
-   }
-
-   if ($opt_v == 0) {
-      $insql .= ");";
-
-      # prepare line number/delete/showkey depending on options
-      $lpre = "";
-      if ($opt_l) {
-         $lpre = "[" . $l;
-         if ($del != 0) {$lpre .= "-deleted";}
-         if ($showkey ne "") {$lpre .= " " . $showkey;}
-         $lpre .=  "] ";
+      elsif ($opt_txt == 1) {                       # txt style
+         foreach $s (@opt_tc) {                     # look at each requested column
+            next if $s ne $col[$i];
+            if ($coldtyp[$i] eq "V") {                      # is V, skip 2 bytes of length
+               $txtfrag{$s} = $cpydata . " " x ($collen[$i] + 1 - length($cpydata) - 2);
+            }
+            else {
+               $txtfrag{$s} = $cpydata . " " x ($collen[$i] + 1 - length($cpydata));
+            }
+            last;
+         }
       }
-      $cnt++;
-      print $lpre . $insql . "\n";          # SQL printed to standard outout
+      else {                                        # INSERT SQL style
+         $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
+         $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
+         if ($i < $coli) {
+            $insql .= ", ";
+         }
+      }
    }
-   else {                                   # TSV processing
+
+   if ($opt_v == 1) {                            # Tab separated data style
       $lpre = "";
       if ($opt_s ne "") {
          if ($showkey ne "") {
@@ -618,11 +659,31 @@ TOP: while ($recpos < $qa1size) {
          }
       }
       ++$cnt;
-      print $lpre . $insql . "\n";          # TSV data line standard outout
    }
+   elsif ($opt_txt == 1) {                       # txt style
+      $lpre = "";
+      $insql = "";
+      foreach $s (@opt_tc) {                     # look at each requested column
+         $insql .= $txtfrag{$s};
+      }
+   }
+   else {                                   # TSV processing
+      $insql .= ");";
+
+      # prepare line number/delete/showkey depending on options
+      $lpre = "";
+      if ($opt_l) {
+         $lpre = "[" . $l;
+         if ($del != 0) {$lpre .= "-deleted";}
+         if ($showkey ne "") {$lpre .= " " . $showkey;}
+         $lpre .=  "] ";
+      }
+   }
+   ++$cnt;
+   print $lpre . $insql . "\n";          # SQL printed to standard outout
 }
 
-print STDERR "Wrote $cnt insert SQL statements for $tablename\n";
+print STDERR "Wrote $cnt lines for $tablename\n";
 
 # all done
 
@@ -650,6 +711,8 @@ sub GiveHelp
     -h              Produce help message
     -l              show input line number
     -v              Product tab delimited .txt file for Excel
+    -txt            formatted text output
+    -tc             columns to display on output [multiple allowed]
     -e              include deleted lines
     -qib            include QIB columns
     -s key          show key value before INSERT SQL
@@ -659,7 +722,7 @@ sub GiveHelp
     -x key=value    exclude rows where column data starts with value
 
     -e and -s only have effect if -l show line number is present
-    -l and -v are mutually exclusive
+    -l and -v and -txt are mutually exclusive
 
   Examples:
     $0  $kibfn QA1DNSAV.DB > insert_nsav.sql
