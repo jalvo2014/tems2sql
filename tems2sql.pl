@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.120000;
+$gVersion = 1.121000;
 
 
 # no CPAN packages used
@@ -213,6 +213,11 @@ while (@ARGV) {
 $kibfn = $ARGV[0] if defined($ARGV[0]);
 $qa1fn = $ARGV[1] if defined($ARGV[1]);
 
+die "Catalog file missing from command line\n" if !defined  $ARGV[0];
+die "QA1 file missing from command line\n" if !defined  $ARGV[1];
+die "Catalog file missing\n" unless -e $ARGV[0];
+die "QA1 file missing\n" unless -e $ARGV[1];
+
 if (!$opt_h) {$opt_h=0;}                            # help flag
 if (!$opt_d) {undef $DEBUG;}                        # debug mode is turned off
 if (!$opt_l) {$opt_l=0;}                            # line number prefix
@@ -357,7 +362,6 @@ open(KIB, "< $kibfn") || die("Could not open kib $kibfn\n");
 close(KIB);
 
 $l = 0;
-
 $testfn = "VSAM." . $tablefn;
 $tablename = "";
 @words = ();
@@ -1057,3 +1061,4 @@ exit;
 #            Better output format for -txt
 #            Allow -tc to set multiple columns
 #            Add -o option for output control
+# 1.210000 : Better checking on arguments make sure cat and qa1 file exist
