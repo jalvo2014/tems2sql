@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.27000;
+$gVersion = 1.28000;
 
 
 # no CPAN packages used
@@ -147,7 +147,6 @@ else {
 
 
 while (@ARGV) {
-#$DB::single=2;
    if ($ARGV[0] eq "-h") {
       &GiveHelp;                        # print help and exit
    }
@@ -220,10 +219,6 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_z = 1;
    }
-   elsif ($ARGV[0] eq "-v") {
-      shift(@ARGV);
-      $opt_v = 1;
-   }
    elsif ($ARGV[0] eq "-val") {
       shift(@ARGV);
       $opt_val = 1;
@@ -287,15 +282,15 @@ if (!defined $opt_e) {$opt_e=0;}                            # show deleted flag
 if (!defined $opt_ee) {$opt_ee=0;}                          # show only deleted flag
 if (!defined $opt_ix) {$opt_ix=0;}                          # output only index records
 if (!defined $opt_qib) {$opt_qib=0;}                        # include QIB Columns
-if (!@opt_skey) {@opt_skey=();}                     # show keys
+if (!@opt_skey) {@opt_skey=();}                             # show keys
 if (!defined $opt_sx) {$opt_sx="";}                         # show key exclude file
 if (!defined $opt_si) {$opt_si="";}                         # show key include file
 if (!defined $opt_table) {$opt_table="";}                   # set tablename
-if (!@opt_excl) {@opt_excl=();}                     # set excludes to null
+if (!@opt_excl) {@opt_excl=();}                             # set excludes to null
 if (!defined $opt_txt) {$opt_txt=0;}                        # text output
 if (!defined $opt_val)  {$opt_val=0;}                       # text output
 if (!defined $opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
-if (!@opt_tc)  {@opt_tc=();}                        # set text columns to null
+if (!@opt_tc)  {@opt_tc=();}                                # set text columns to null
 if (!defined $opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
 
 my $got_qibclassid = 0;                             # when 1 a QIBCLASSID was found
@@ -889,8 +884,7 @@ $cvalue = "";
 
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
-#if ($col[$i] eq 'KEY') {
-#$DB::single=2;
+#if ($col[$i] eq 'PDT') {
 #}
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
@@ -911,7 +905,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       } else {
          $firstc = substr($coldtyp[$i],0,1);        # if first character
          if ($firstc eq "V") {                      # is V...
-            if ($qa_endian == 1) {                  # big_endian size
+            if ($qa_endian == 0) {                  # big_endian size
                $clen = unpack("n",substr($buffer,$dpos,2));
             } else {                                # else little endian size
                $clen = unpack("v",substr($buffer,$dpos,2));  # pick out length
@@ -1217,3 +1211,4 @@ exit;
 # 1.270000 : -z to identify z/OS VSAM REPROed to sequential files
 #            auto identification did not work
 #            -tlim 0 did not work
+# 1.280000 : correct problem with non-zos case
