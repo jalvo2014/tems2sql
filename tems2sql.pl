@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.31000;
+$gVersion = 1.32000;
 
 
 # no CPAN packages used
@@ -428,12 +428,12 @@ if (defined $opt_o) {
    if ($opt_o ne "") {
       $opt_ofn = $opt_o;
    } else {
-      if ($opt_ix) { $opt_ofn = $tablefn . "\.DB\.ix" }
-      elsif ($opt_l) { $opt_ofn = $tablefn . "\.DB\.lst" }
-      elsif ($opt_ref) { $opt_ofn = $tablefn . "\.DB\.ref" }
-      elsif ($opt_txt) { $opt_ofn = $tablefn . "\.DB\.txt" }
-      elsif ($opt_val) { $opt_ofn = $tablefn . "\.DB\.val" }
-      elsif ($opt_v) { $opt_ofn = $tablefn . "\.DB\.csv" }
+      if ($opt_ix) { $opt_ofn = $tablefn . "\.DB\.IX" }
+      elsif ($opt_l) { $opt_ofn = $tablefn . "\.DB\.LST" }
+      elsif ($opt_ref) { $opt_ofn = $tablefn . "\.DB\.REF" }
+      elsif ($opt_txt) { $opt_ofn = $tablefn . "\.DB\.TXT" }
+      elsif ($opt_val) { $opt_ofn = $tablefn . "\.DB\.VAL" }
+      elsif ($opt_v) { $opt_ofn = $tablefn . "\.DB\.CSV" }
       else { $opt_ofn = $tablefn . "\.DB\.sql" }
    }
    $opt_ofn =~ s|\\|\/|g;  # convert backslash to forward slash
@@ -1384,3 +1384,4 @@ exit;
 #          : Add -varyrec to handle zome z/OS cases
 # 1.300000 : Correct length calculation in none z/OS case
 # 1.310000 : Correct line count in message for -v option
+# 1.320000 : on -o outputs, upper case extension. Needed for non-Windows environments
