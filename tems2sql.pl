@@ -27,8 +27,9 @@
 # 0.600000 : handle fields with embedded single quotes
 # 0.700000 : handle z/OS repro files calculate recsize from cat table, add -qib option
 # 0.750000 : add != test in exclude
+# 0.800000 : handle Relrec case and ignore I type table definitions needed for TSITSTSH
 
-$gVersion = 0.750000;
+$gVersion = 0.800000;
 
 # $DB::single=2;   # remember debug breakpoint
 
@@ -116,6 +117,7 @@ foreach $oneline (@kib_data)
    @words = split(" ",$oneline);
    if ($words[2] ne $testfn) {next;}
    $tablename = $words[1];
+   next if substr($tablename,0,1) ne "T";
    last;
 }
 if ($tablename eq "") {die("kib catalog missing tablefn $testfn.\n");}
@@ -257,6 +259,7 @@ my $fields;
 my $qa_endian = 0;  # remember endian type \ 1=little 0=big
 my $zos = 0;        # assume not z/OS repro
 my $recpos = 0;                                        # pointer to file position
+my $relrec = 0;     # handle relrec cases
 
 $qa1size = -s  $qa1fn;                                 # file size in bytes
 
@@ -306,13 +309,13 @@ else {
    # within the header there are a series of stings and from within that the record length
    # can be calculated. Here is what it looks like
    #
+   #     Relrec,H
    #     RuleName,C32.
    #     Predicate,C3000.
 
    $recpos = 4;
    seek(QA,$recpos,0);
    $num = read(QA,$buffer,4,0);
-
    # extract count of field definition
    $fcount = ($qa_endian == 0) ? unpack("N",$buffer) : unpack("V",$buffer);
    $recpos = 8;
@@ -323,6 +326,11 @@ else {
    @fstr = split(/\x00/,$buffer);                         # split $buffer by hex 00
    for ($i=0;$i<$fcount;$i++) {
       @field2 = split(/,/,$fstr[$i]);                     # split field def by commas
+      if ($field2[1] eq "H"){
+         $relrec = 2;
+         $recsize += 2;
+         next;
+      }
       $size1 = substr($field2[1],1);                      # extract field size
       $recsize += $size1;                                 # add to total record size
    }
@@ -409,6 +417,7 @@ TOP: while ($recpos < $qa1size) {
          }
          $dpos += 2;                                   # and adjust starting point of data
       }
+      $dpos += $relrec;                          # skip over relative record internal key
       $cpydata = substr($buffer,$dpos, $clen);   # first stab at data
       $firstc = substr($cpydata,0,1);            # if first character binary zero, set string to null
       if (ord($firstc) == 0) {
