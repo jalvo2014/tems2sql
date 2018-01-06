@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.32000;
+$gVersion = 1.33000;
 
 
 # no CPAN packages used
@@ -85,6 +85,7 @@ my $opt_z = 0;      # identify zOS reproed VSAM files
 my $opt_skip = 0;
 my %opt_skipx = ();
 my $opt_varyrec = 0;    # varying record size in z/OS
+my $opt_tr = 0;         # translate carriage return, line feed, tab into escapes
 my $debug_now = 0;
 my $curr_lstdate;
 
@@ -265,6 +266,10 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-varyrec") {
       shift(@ARGV);
       $opt_varyrec = 1;
+   }
+   elsif ($ARGV[0] eq "-tr") {
+      shift(@ARGV);
+      $opt_tr = 1;
    }
    elsif ($ARGV[0] eq "-skip") {
       shift(@ARGV);
@@ -1133,6 +1138,11 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          }
       }
       elsif ($opt_txt == 1) {                       # txt style
+         if ($opt_tr == 1) {
+            $cpydata =~ s/\x09/\\t/g;
+            $cpydata =~ s/\x0A/\\n/g;
+            $cpydata =~ s/\x0D/\\r/g;
+         }
          foreach $s (@opt_tc) {                     # look at each requested column
             next if $s ne $col[$i];
             if ($coldtyp[$i] eq "V") {                      # is V, skip 2 bytes of length
@@ -1385,3 +1395,4 @@ exit;
 # 1.300000 : Correct length calculation in none z/OS case
 # 1.310000 : Correct line count in message for -v option
 # 1.320000 : on -o outputs, upper case extension. Needed for non-Windows environments
+# 1.330000 : add -tr to clarify text attributes with embedded tabs, carriage returns and line feeds
