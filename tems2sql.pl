@@ -37,6 +37,7 @@
 # 0.970000 : handle excludes of null values
 # 1.000000 : Remove CPAN requirements
 # 1.050000 : Handle I2 and I4 type columns
+# 1.100000 : Handle tables with multiple show keys
 
 $gVersion = 1.050000;
 
@@ -73,7 +74,8 @@ my $opt_l;               # line number prefix
 my $opt_v;               # CSV output
 my $opt_e;               # show deleted flag
 my $opt_qib;             # include QIB Columns
-my $opt_s;               # show key
+my $opt_sct;             # count of show keys collected
+my @opt_skey;            # show keys
 my $opt_sx;              # show key exclude file
 my $opt_si;              # show key include file
 my $opt_table;           # set tablename
@@ -104,8 +106,9 @@ while (@ARGV) {
    }
    elsif ($ARGV[0] eq "-s") {
       shift(@ARGV);
-      $opt_s = shift(@ARGV);
-      die "option -s with no following column name\n" if !defined $opt_s;
+      $opt_test = shift(@ARGV);
+      die "option -s with no following column name\n" if !defined $opt_test;
+      push(@opt_skey,$opt_test);
    }
    elsif ($ARGV[0] eq "-sx") {
       shift(@ARGV);
@@ -151,7 +154,7 @@ if (!$opt_l) {$opt_l=0;}                            # line number prefix
 if (!$opt_v) {$opt_v=0;}                            # TSV output
 if (!$opt_e) {$opt_e=0;}                            # show deleted flag
 if (!$opt_qib) {$opt_qib=0;}                        # include QIB Columns
-if (!$opt_s) {$opt_s="";}                           # show key
+if (!@opt_skey) {@opt_skey=();}                     # show keys
 if (!$opt_sx) {$opt_sx="";}                         # show key exclude file
 if (!$opt_si) {$opt_si="";}                         # show key include file
 if (!$opt_table) {$opt_table="";}                   # set tablename
@@ -183,11 +186,11 @@ if ($opt_sx ne "" && $opt_si ne "") {
 
 }
 
-if ($opt_sx ne "" && $opt_s eq "") {
+if ($opt_sx ne "" && $#opt_skey == -1) {
    die("Showkey exclude $opt_sx specified but -s is required and not specified\n");
 }
 
-if ($opt_si ne "" && $opt_s eq "") {
+if ($opt_si ne "" && $#opt_skey == -1) {
    die("Showkey include $opt_si specified but -s is required and not specified\n");
 }
 
@@ -533,7 +536,7 @@ my %txtfrag = ();     # associative array for txt output by column
 if ($opt_v == 1) {                                    # TSV output, emit header line
    $quotech = '"';
    $insql = "";
-   if ($opt_s ne "") {
+   if ($#opt_skey != -1) {
       $insql .= "ShowKey\t";
    }
    if ($opt_e == 1) {
@@ -607,6 +610,7 @@ TOP: while ($recpos < $qa1size) {
 
 
    $showkey = "";
+   $opt_sct = -1;
    $insql = "";
    if ($opt_v == 0 && $opt_txt == 0) {
       # data record found. Generate insert SQL which has this form:
@@ -631,7 +635,6 @@ TOP: while ($recpos < $qa1size) {
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
 #if ($col[$i] eq "PDT") {
-#$DB::single=2;
 #}
       $dpos = $colpos[$i];                       # starting point of data
       $dpos += $relrec;                          # skip over relative record internal key
@@ -703,14 +706,24 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
 
       # if a show column is specified, record it now
 
-      if ($opt_s eq $col[$i]) {
-         $showkey = $cpydata;
-         if ($opt_sx ne "") {                               # if doing showkey excludes, ignore record if in include list
-            next TOP if defined $show_exclude{$showkey};
+      # If there are show key columns, calculate the show key
+      if ($#opt_skey != -1) {
+         foreach $s (@opt_skey) {
+            if ($s eq $col[$i]) {
+               $showkey .= "|" if $showkey ne "";
+               $showkey .= $cpydata;
+               $opt_sct  += 1;
+               last;
+            }
          }
-         if ($opt_si ne "") {                               # if doing showkey include, ignore record if not in include list
-            next TOP if !defined $show_include{$showkey};
-         }
+        if ($#opt_skey == $opt_sct) {
+           if ($opt_sx ne "") {                               # if doing showkey excludes, ignore record if in include list
+              next TOP if defined $show_exclude{$showkey};
+           }
+           if ($opt_si ne "") {                               # if doing showkey include, ignore record if not in include list
+              next TOP if !defined $show_include{$showkey};
+           }
+        }
       }
 
       if ($opt_v == 1) {                            # for TSV style, emit just tab
@@ -750,7 +763,7 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
 
    if ($opt_v == 1) {                            # Tab separated data style
       $lpre = "";
-      if ($opt_s ne "") {
+      if ($#opt_skey != -1) {
          if ($showkey ne "") {
             $lpre = $showkey . "\t";
          }
