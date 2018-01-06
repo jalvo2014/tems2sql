@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.33000;
+$gVersion = 1.34000;
 
 
 # no CPAN packages used
@@ -86,6 +86,7 @@ my $opt_skip = 0;
 my %opt_skipx = ();
 my $opt_varyrec = 0;    # varying record size in z/OS
 my $opt_tr = 0;         # translate carriage return, line feed, tab into escapes
+my $opt_endian = 0;     # When 1 display endian status
 my $debug_now = 0;
 my $curr_lstdate;
 
@@ -187,6 +188,10 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-ix") {
       shift(@ARGV);
       $opt_ix = 1;
+   }
+   elsif ($ARGV[0] eq "-endian") {
+      shift(@ARGV);
+      $opt_endian = 1;
    }
    elsif ($ARGV[0] eq "-ref") {
       shift(@ARGV);
@@ -691,6 +696,8 @@ if ($opt_z == 1) {
 } else {
    $qa_endian = 1 if $test2 == 0;
 }
+
+print STDERR "Endian [$qa_endian]\n" if $opt_endian == 1;
 
 # most zOS repro dump is fixed length and the catalog calculation is sufficient
 # if this a Relrec type, starts with zero and then a two byte sequence number
@@ -1396,3 +1403,4 @@ exit;
 # 1.310000 : Correct line count in message for -v option
 # 1.320000 : on -o outputs, upper case extension. Needed for non-Windows environments
 # 1.330000 : add -tr to clarify text attributes with embedded tabs, carriage returns and line feeds
+# 1.340000 : Add -endian option to show type of distributed QA1 file - big endian or little endian
