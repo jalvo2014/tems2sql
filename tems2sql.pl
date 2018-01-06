@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.25000;
+$gVersion = 1.26000;
 
 
 # no CPAN packages used
@@ -72,6 +72,7 @@ my @opt_tc = ();         # set text columns to null
 my @opt_tlim;            # txt output column display limit, 0 means all, default 256.
 my $opt_test;
 my $opt_fav;
+my $opt_gal = "gal";     # Assume Global Access List level
 my %hQA1names;
 my @tableInfo = ();          # set to null
 my @favColNames = ();         # set to null
@@ -104,6 +105,11 @@ TSITSTSH => 'QA1CSTSH,GBLTMSTMP,SITNAME,NODE,ORIGINNODE,DELTASTAT,FULLNAME,ATOMI
 TEIBLOGT => 'QA1CEIBL,GBLTMSTMP,LSTUSRPRF,OBJNAME,OPERATION,ORIGINNODE,TABLENAME',
 SYSTABLES => 'QA1CDSCA,APPL_NAME,RECTYPE,TABL_NAME,VERS_PROBE,LOCATOR,DELETER,INSERTER,UPDATER',
 CCT => 'QA1DCCT,KEY,NAME,DESC,CMD,TABLES',
+);
+
+%hTableIgnoreKeys = (
+"QA1DOBJA!HUB"         => 'gal',
+"QA1DOBJA!ACTIVATION"  => 'gal',
 );
 
 # following is list of modules which need a QIBCLASSID column
@@ -219,6 +225,10 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-f") {
       shift(@ARGV);
       $opt_fav = 1;
+   }
+   elsif ($ARGV[0] eq "-nogal") {
+      shift(@ARGV);
+      $opt_gal = "nogal";
    }
    elsif ($ARGV[0] eq "-tc") {
       shift(@ARGV);
@@ -708,6 +718,8 @@ my $showkey;          # header attribute
 my $eof;              # zos check of end of file
 my $quotech = "'";
 my %txtfrag = ();     # associative array for txt output by column
+my $ctitle;
+my $cvalue;
 
 if ($opt_v == 1) {                                    # TSV output, emit header line
    $quotech = '"';
@@ -769,7 +781,20 @@ elsif ($opt_txt == 1) {
 }
 elsif ($opt_val == 1) {
    print "Nickname:" . $opt_val_nickname . " Table:" . $tablename . "  Internal Name:" . $tablefn . "\n\n";
+   $ctitle = "showkey ";
+   # column names
+   for ($i = 0; $i <= $coli; $i++) {
+      next if $col[$i] eq "LSTDATE";
+      next if $col[$i] eq "LSTUSRPRF";
+      next if $col[$i] eq "LOCFLAG";
+      next if $col[$i] eq "GBLTMSTMP";
+      next if $col[$i] eq "LCLTMSTMP";
+      $ctitle .= "|" if $ctitle ne "showkey ";
+      $ctitle .= $col[$i];
+   }
    $cnt += 2;
+   print "$ctitle\n";
+   $cnt += 1;
 }
 
 TOP: while ($recpos < $qa1size) {
@@ -838,6 +863,7 @@ TOP: while ($recpos < $qa1size) {
    }
 
 $opt_future_date = 0;                               # asume date is not in future
+$cvalue = "";
 
    # extract column data from buffer
 COLUMN: for ($i = 0; $i <= $coli; $i++) {
@@ -969,11 +995,19 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
          }
       }
       elsif ($opt_val == 1) {                       # validate style - line per column
-         $insql = $col[$i] . " " x (10 + 1 - length($col[$i]));
-         $insql .= sprintf("%04d", length($cpydata));
-         $insql .= " " . $cpydata . "\n";
-         print $insql;
-         $cnt++
+         next if $col[$i] eq "LSTDATE";
+         next if $col[$i] eq "LSTUSRPRF";
+         next if $col[$i] eq "LOCFLAG"; ;
+         next if $col[$i] eq "GBLTMSTMP";
+         next if $col[$i] eq "LCLTMSTMP";
+#DB::single=2;
+         my $tkey = $tablefn . "!" . $col[$i];
+         my $tx = $hTableIgnoreKeys{$tkey};
+         if (defined $tx) {
+            $cpydata = "" if $tx eq $opt_gal;
+         }
+         $cvalue .= "|" if $i > 0;
+         $cvalue .= $cpydata;
       }
       else {                                        # INSERT SQL style
          $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
@@ -1029,11 +1063,11 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       }
       $insql =~ s/(\s+$)//g;                     # remove trailing white space
    } elsif ($opt_val == 1) {                     # validate style print record key
-      $insql = "*showkey*  ";
-      $insql .= sprintf("%04d", length($showkey));
-      $insql .= " " . $showkey . "\n\n";
+      $insql = $showkey . " " x (128 + 1 - length($showkey));
+      $insql .= sprintf("%04d", length($cvalue));
+      $insql .= " " . "$cvalue\n";
       print $insql;
-      $cnt +=2;
+      $cnt +=1;
       next;
    } elsif ($opt_ix == 1) {                      # index only output
       $lpre = "";
@@ -1103,6 +1137,7 @@ sub GiveHelp
     -si file        include rows where showkey contained in this file
     -t table        specify 'friendly' table name, i.e. TNODELST, TOBJACCL, ...
     -x key=value    exclude rows where column data starts with value
+    -nogal          Do not ignore the TOBJACCL HUB AND ACTIVATION rows - before ITM 623 GA level
 
     -e and -s only have effect if -l show line number is present
     -l and -v and -txt are mutually exclusive
@@ -1151,3 +1186,5 @@ exit;
 # 1.230000 : add some QIBCLASSID table id values
 # 1.240000 : -future itmstamp to create error report on LSTDATE beyond that stamp
 # 1.250000 : -va option to create validate files
+#            add temsval.pl to package
+# 1.260000 : -nogal  to not ignore TOBJACCL and AND ACTIVATION columns
