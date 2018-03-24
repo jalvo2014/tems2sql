@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.36000;
+$gVersion = 1.37000;
 
 
 # no CPAN packages used
@@ -85,11 +85,13 @@ my $DEBUG = "YES";
 my $opt_o;               # when defined, set output controls
 my $opt_ofn;             # output filename
 my $opt_z = 0;      # identify zOS reproed VSAM files
+my $opt_showpos = 0;
 my $opt_skip = 0;
 my %opt_skipx = ();
 my $opt_varyrec = 0;    # varying record size in z/OS
 my $opt_tr = 0;         # translate carriage return, line feed, tab into escapes
 my $opt_endian = 0;     # When 1 display endian status
+my $opt_utf8 = 0;       # When 1 produce utf8 report
 my $debug_now = 0;
 my $curr_lstdate;
 
@@ -200,6 +202,10 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_endian = 1;
    }
+   elsif ($ARGV[0] eq "-utf8") {
+      shift(@ARGV);
+      $opt_utf8 = 1;
+   }
    elsif ($ARGV[0] eq "-ref") {
       shift(@ARGV);
       $opt_ref = 1;
@@ -288,6 +294,10 @@ while (@ARGV) {
       shift(@ARGV);
       $opt_tr = 1;
    }
+   elsif ($ARGV[0] eq "-showpos") {
+      shift(@ARGV);
+      $opt_showpos = 1;
+   }
    elsif ($ARGV[0] eq "-skip") {
       shift(@ARGV);
       $opt_skip = 1;
@@ -342,6 +352,7 @@ if (!defined $opt_val)  {$opt_val=0;}                       # text output
 if (!defined $opt_fav) {$opt_fav=0;}                        # favorite (preferred) table columns
 if (!@opt_tc)  {@opt_tc=();}                                # set text columns to null
 if (!defined $opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
+if (!defined $opt_utf8)  {$opt_utf8=0;}                     # no utf8 by default
 
 my $got_qibclassid = 0;                             # when 1 a QIBCLASSID was found
 
@@ -353,6 +364,10 @@ if ($gWin) {
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if !defined($ARGV[0]);
    $kibfn = "$ITM/cms/rkdscatl/kib.cat"       if $kibfn eq ".";
    $qa1fn = "$ITM/cms"                        if !defined($ARGV[1]);;
+   if ($opt_utf8 == 1) {
+      require Win32::Console;
+      Win32::Console::OutputCP(65001);
+   }
 }
 
 # if running on Linux/Unix initialize for Windows
@@ -486,7 +501,9 @@ foreach $oneline (@kib_data)
    $l++;
    if (substr($oneline,0,1) ne "T") {next;}
    @words = split(" ",$oneline);
+$DB::single=2;
    if ($words[2] ne $testfn) {next;}
+$DB::single=2;
    if ($opt_table ne "") {
      next if $words[1] ne $opt_table;
    }
@@ -1088,6 +1105,11 @@ TOP: while ($recpos < $qa1size) {
    # record is now in $buffer
 
    $l++;                           # count logical records
+   if($opt_showpos == 1) {
+      my $hex = sprintf("0x%X", $recpos);
+      my $rhex = sprintf("0x%X", $recsize);
+      print STDERR "Debug line $l recsize $rhex $recsize recpos $hex $recpos\n";
+   }
 #   print "working on line $l\n";  ##debug
    $showkey = "";
    $opt_sct = -1;
@@ -1246,11 +1268,11 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
             $insql .= "\t";
          }
       }
-      elsif ($opt_txt == 1) {                       # txt style
+      elsif ($opt_txt == 1) {                       # txt style - avoid increasing attribute value length
          if ($opt_tr == 1) {
-            $cpydata =~ s/\x09/\\t/g;
-            $cpydata =~ s/\x0A/\\n/g;
-            $cpydata =~ s/\x0D/\\r/g;
+            $cpydata =~ s/\x09/\\/g;
+            $cpydata =~ s/\x0A/\\/g;
+            $cpydata =~ s/\x0D/\\/g;
          }
          foreach $s (@opt_tc) {                     # look at each requested column
             next if $s ne $col[$i];
@@ -1524,3 +1546,4 @@ exit;
 # 1.350000 : Add -last which with -ee will only output the most recent deleted object
 # 1.360000 : Add minimal support for QA1CDSCA and SYSTABLES - actually packages
 #            QA1CDSCA is not described in a .cat file but the logic fakes it
+# 1.370000 : Correct -tr in -txt context to avoid increasing value length
