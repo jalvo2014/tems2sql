@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.37000;
+$gVersion = 1.38000;
 
 
 # no CPAN packages used
@@ -501,9 +501,7 @@ foreach $oneline (@kib_data)
    $l++;
    if (substr($oneline,0,1) ne "T") {next;}
    @words = split(" ",$oneline);
-$DB::single=2;
    if ($words[2] ne $testfn) {next;}
-$DB::single=2;
    if ($opt_table ne "") {
      next if $words[1] ne $opt_table;
    }
@@ -810,6 +808,9 @@ $recpos = 2;
 $num = read(QA,$buffer,2,0);
 die "unexpected size difference" if $num != 2;
 $test2 = unpack("n",$buffer);
+
+die "Unexpected header cannot identify ended-ness [both nonzero]" if ($test0 !=0) and ($test2 != 0);
+die "Unexpected header cannot identify ended-ness [both zero]" if ($test0 ==0) and ($test2 == 0);
 
 if ($opt_z == 1) {
    $qa_endian = 0;
@@ -1547,3 +1548,4 @@ exit;
 # 1.360000 : Add minimal support for QA1CDSCA and SYSTABLES - actually packages
 #            QA1CDSCA is not described in a .cat file but the logic fakes it
 # 1.370000 : Correct -tr in -txt context to avoid increasing value length
+# 1.380000 : Detect another case of corrupted database file, first two 16 byte words are both 0 or neither empty.
