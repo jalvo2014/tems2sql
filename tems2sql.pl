@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.38000;
+$gVersion = 1.39000;
 
 
 # no CPAN packages used
@@ -476,7 +476,7 @@ if (defined $opt_o) {
       else { $opt_ofn = $tablefn . "\.DB\.sql" }
    }
    $opt_ofn =~ s|\\|\/|g;  # convert backslash to forward slash
-   open FILE, ">$opt_ofn" or die "Unable to open output file $opt_ofn\n";
+   open FILE, "+>$opt_ofn" or die "Unable to open output file $opt_ofn\n";
    select FILE;              # print will use FILE instead of STDOUT
 }
 
@@ -1078,6 +1078,7 @@ TOP: while ($recpos < $qa1size) {
          die "unexpected size difference" if $num != 2;
          $del = unpack("v",$buffer);                      # 0000 or FFFF so no endian differences
       }
+      die "Delete flag not 0000 or FFFF [$del] at position $recpos(decimal)" if ($del !=0) and ($del != 65535);
       $recpos += 2;
       seek(QA,$recpos,0);                                 # re-position file for reading
       $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
@@ -1090,7 +1091,14 @@ TOP: while ($recpos < $qa1size) {
          next TOP if $opt_ee == 1;                        # only deleted records wanted
       }
       if ($del != 0) {                                    # deleted record
-         next TOP if $opt_e == 0;
+         if ($opt_e == 0) {
+            if($opt_showpos == 1) {
+               my $hex = sprintf("0x%X", $recpos);
+               my $rhex = sprintf("0x%X", $recsize);
+               print STDERR "Skipping deleted line recsize $rhex $recsize recpos $hex $recpos\n";
+            }
+            next TOP;
+         }
       }
    }
 
@@ -1549,3 +1557,5 @@ exit;
 #            QA1CDSCA is not described in a .cat file but the logic fakes it
 # 1.370000 : Correct -tr in -txt context to avoid increasing value length
 # 1.380000 : Detect another case of corrupted database file, first two 16 byte words are both 0 or neither empty.
+# 1.390000 : deliberately clobber the output file if present
+#          : Detect incorrect delete flag
