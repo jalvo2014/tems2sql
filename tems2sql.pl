@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.40000;
+$gVersion = 1.41000;
 
 
 # no CPAN packages used
@@ -1083,17 +1083,17 @@ TOP: while ($recpos + $recsize < $qa1size) {
          $num = read(QA,$buffer,2,0);                     # read 2 bytes
          die "unexpected size difference at pos $recpos"if $num != 2;
          my $tsizer = unpack("v",$buffer);                # Should be length
-         seek(QA,$recpos+2,0);                              # position file for reading
-         $num = read(QA,$buffer,2,0);                     # read 2 bytes
-         die "unexpected size difference at pos $recpos"if $num != 2;
-         $del = unpack("v",$buffer);                      # 0000 or FFFF so no endian differences
+         seek(QA,$recpos+2,0);                            # position file for reading
+         $num = read(QA,$buffer,1,0);                     # read 1 bytes
+         die "unexpected size difference at pos $recpos"if $num != 1;
+         $del = unpack("c",$buffer);                      # 00 or FF so no endian differences
 
          my $dofloat = 0;
          if (($del == 0) and ($tsizer = $recsize)) {    # all is well record
          } elsif ($del == 0) {                          # zero del but recsize wrong
             $dofloat = 1;                               #  float along
-         } elsif ($del == 65535) {                      # all is well and s deleted record
-         } elsif (($del != 0) and ($del != 65535)) {    # second slot not a valid descriptor
+         } elsif ($del == -1) {                      # all is well and s deleted record
+         } elsif (($del != 0) and ($del != -1)) {    # second slot not a valid descriptor
             $dofloat = 1;                               #  float along
          }
          if ($dofloat == 1) {                           # something very wrong, need to float ahead and find valid record header
@@ -1108,10 +1108,54 @@ TOP: while ($recpos + $recsize < $qa1size) {
                   die "unexpected size difference at pos $test_recpos"if $num != 2;
                   $tsizer = unpack("v",$buffer);                # Should be length
                   seek(QA,$test_recpos+2,0);                              # position file for reading
-                  $num = read(QA,$buffer,2,0);                     # read 2 bytes
+                  $num = read(QA,$buffer,1,0);                     # read 1 bytes
+                  die "unexpected size difference at pos $test_recpos"if $num != 1;
+                  $del = unpack("c",$buffer);                # Should be length
+                  if (($del == -1) or (($del == 0) and ($tsizer == $recsize))) {
+                     warn "Skipping damaged record at $recpos pos [$i]";
+                     $crecpos += $i;
+                     $recpos += $i;
+                     $gotrec = 1;
+                     last;
+                  }
+               }
+               die "Length field not matched at pos $test_recpos start $recpos_start" if $gotrec == 0;
+            }
+         }
+      } else {
+$DB::single=2;
+         seek(QA,$recpos+2,0);                            # position file for reading
+         $num = read(QA,$buffer,2,0);                     # read 2 bytes
+         die "unexpected size difference at pos $recpos"if $num != 2;
+         my $tsizer = unpack("n",$buffer);                # Should be length
+         seek(QA,$recpos,0);                              # position file for reading
+         $num = read(QA,$buffer,1,0);                     # read 1 bytes
+         die "unexpected size difference at pos $recpos"if $num != 1;
+         $del = unpack("c",$buffer);                      # 00 or FF so no endian differences
+         my $dofloat = 0;
+         if (($del == 0) and ($tsizer = $recsize)) {    # all is well record
+         } elsif ($del == 0) {                          # zero del but recsize wrong
+            $dofloat = 1;                               #  float along
+         } elsif ($del == -1) {                      # all is well and s deleted record
+         } elsif (($del != 0) and ($del != -1)) {    # second slot not a valid descriptor
+            $dofloat = 1;                               #  float along
+         }
+         if ($dofloat == 1) {                           # something very wrong, need to float ahead and find valid record header
+            my $gotrec = 0;
+            my $recpos_start = $recpos;
+            my $test_recpos;
+            if ($opt_float != 0) {
+               for ($i = 1; $i <= $opt_float; $i++) {
+                  $test_recpos = $recpos + $i;
+                  seek(QA,$test_recpos+2,0);                 # position file for reading
+                  $num = read(QA,$buffer,2,0);                  # read 2 bytes
                   die "unexpected size difference at pos $test_recpos"if $num != 2;
-                  $del = unpack("v",$buffer);                # Should be length
-                  if (($del == 65535) or (($del == 0) and ($tsizer == $recsize))) {
+                  $tsizer = unpack("n",$buffer);                # Should be length
+                  seek(QA,$test_recpos,0);                              # position file for reading
+                  $num = read(QA,$buffer,1,0);                     # read 1 bytes
+                  die "unexpected size difference at pos $test_recpos"if $num != 1;
+                  $del = unpack("c",$buffer);                # Should be length
+                  if (($del == -1) or (($del == 0) and ($tsizer == $recsize))) {
                      warn "Skipping damaged record at $recpos pos [$i]";
                      $crecpos += $i;
                      $recpos += $i;
@@ -1124,7 +1168,7 @@ TOP: while ($recpos + $recsize < $qa1size) {
          }
       }
       if ($opt_checkdel == 1) {
-         die "Delete flag not 0000 or FFFF [$del] at position $recpos(decimal)" if ($del !=0) and ($del != 65535);
+         die "Delete flag not 0000 or FFFF [$del] at position $recpos(decimal)" if ($del !=0) and ($del != -1);
       }
       $recpos += 4;
       seek(QA,$recpos,0);                                 # re-position file for reading
@@ -1608,3 +1652,4 @@ exit;
 #          : Detect incorrect delete flag
 # 1.400000 : Add -nocheckdel option
 #            Add -float option to search for valid header.
+# 1.410000 : Correct record header logic for littleendian and bigendian
