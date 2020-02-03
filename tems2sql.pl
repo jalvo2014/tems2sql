@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.39000;
+$gVersion = 1.40000;
 
 
 # no CPAN packages used
@@ -46,6 +46,8 @@ $ccsid1047 =
 '\060\061\062\063\064\065\066\067\070\071\263\333\334\331\332\237' ;
 
 $gWin = (-e "C:/") ? 1 : 0;       # determine Windows versus Linux/Unix for detail settings
+
+my $tracenow = 0;
 
 # Work through the command line options
 
@@ -76,6 +78,7 @@ my @opt_tc = ();         # set text columns to null
 my @opt_tlim;            # txt output column display limit, 0 means all, default 256.
 my $opt_test;
 my $opt_showone;
+my $opt_float = 0;
 my $opt_fav;
 my $opt_gal = "gal";     # Assume Global Access List level
 my %hQA1names;
@@ -92,6 +95,7 @@ my $opt_varyrec = 0;    # varying record size in z/OS
 my $opt_tr = 0;         # translate carriage return, line feed, tab into escapes
 my $opt_endian = 0;     # When 1 display endian status
 my $opt_utf8 = 0;       # When 1 produce utf8 report
+my $opt_checkdel = 1;
 my $debug_now = 0;
 my $curr_lstdate;
 
@@ -297,6 +301,14 @@ while (@ARGV) {
    elsif ($ARGV[0] eq "-showpos") {
       shift(@ARGV);
       $opt_showpos = 1;
+   }
+   elsif ($ARGV[0] eq "-nocheckdel") {
+      shift(@ARGV);
+      $opt_checkdel = 0;
+   }
+   elsif ($ARGV[0] eq "-float") {
+      shift(@ARGV);
+      $opt_float = 16384;
    }
    elsif ($ARGV[0] eq "-skip") {
       shift(@ARGV);
@@ -800,13 +812,13 @@ RESTART:        # used during -ee and -last processing
 # get first integer
 seek(QA,$recpos,0);
 $num = read(QA,$buffer,2,0);
-die "unexpected size difference" if $num != 2;
+die "unexpected size difference at pos $recpos"if $num != 2;
 $test0 = unpack("n",$buffer);
 
 # get second integer
 $recpos = 2;
 $num = read(QA,$buffer,2,0);
-die "unexpected size difference" if $num != 2;
+die "unexpected size difference at pos $recpos"if $num != 2;
 $test2 = unpack("n",$buffer);
 
 die "Unexpected header cannot identify ended-ness [both nonzero]" if ($test0 !=0) and ($test2 != 0);
@@ -841,14 +853,14 @@ else {
       $recpos = 2;
       seek(QA,$recpos,0);
       $num = read(QA,$buffer,2,0);
-      die "unexpected size difference" if $num != 2;
+      die "unexpected size difference at pos $recpos"if $num != 2;
       $hdrsize = unpack("n",$buffer);
    }
    else {
       $recpos = 0;
       seek(QA,$recpos,0);
       $num = read(QA,$buffer,2,0);
-      die "unexpected size difference" if $num != 2;
+      die "unexpected size difference at pos $recpos"if $num != 2;
       $hdrsize = unpack("v",$buffer);          # convert little-endian short integer
    }
 
@@ -867,7 +879,7 @@ else {
    $recpos = 8;
    seek(QA,$recpos,0);                                    # position file for reading
    $num = read(QA,$buffer,$hdrsize,0);                    # read 4 bytes
-   die "unexpected size difference" if $num != $hdrsize;  # error case
+   die "unexpected size difference at pos $recpos"if $num != $hdrsize;  # error case
    $recsize = 0;
    @fstr = split(/\x00/,$buffer);                         # split $buffer by hex 00
    for ($i=0;$i<$fcount;$i++) {
@@ -981,8 +993,8 @@ elsif ($opt_val == 1) {
    $cnt += 1;
 }
 
-TOP: while ($recpos < $qa1size) {
-#$DB::single=2 if $recpos >= 132328;
+TOP: while ($recpos + $recsize < $qa1size) {
+#$DB::single=2 if $tracenow == 1;                      # used in continued tracing
    seek(QA,$recpos,0);                                 # position file for reading
    $crecpos = $recpos;                                 # current record file position
    $curr_lstdate = "";
@@ -990,12 +1002,12 @@ TOP: while ($recpos < $qa1size) {
       $del = 0;                                        # no detection of deleted records in zOS
       seek(QA,$recpos,0);                              # position file for reading
       $num = read(QA,$buffer,4,0);                     # read 2 bytes
-      die "unexpected size difference" if $num != 4;
+      die "unexpected size difference at pos $recpos"if $num != 4;
       $eof = unpack("N",$buffer);
       last if $eof == 4294967295;                      # eof key
       seek(QA,$recpos,0);                                 # re-position file for reading
       $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
-      die "unexpected size difference" if $num != $recsize;
+      die "unexpected size difference at pos $recpos"if $num != $recsize;
       my $next_recsize = $recsize;
 
       # One zOS case had varying record lengths, with the excess padded with ASCII blanks
@@ -1064,25 +1076,60 @@ TOP: while ($recpos < $qa1size) {
       }
       seek(QA,$recpos,0);                              # re-position file for reading
       $recpos += $next_recsize;                          # calculate position of next record
-   }
-   else {
-      if ($qa_endian == 0) {                              # big_endian
-         $num = read(QA,$buffer,2,0);                     # read 2 bytes
-         die "unexpected size difference" if $num != 2;
-         $del = unpack("n",$buffer);
-         $recpos += 2;
-      } else {
-         $recpos += 2;
+   } else {
+      # handle floating records
+      if ($qa_endian == 1) {                              # litle_endian
          seek(QA,$recpos,0);                              # position file for reading
          $num = read(QA,$buffer,2,0);                     # read 2 bytes
-         die "unexpected size difference" if $num != 2;
+         die "unexpected size difference at pos $recpos"if $num != 2;
+         my $tsizer = unpack("v",$buffer);                # Should be length
+         seek(QA,$recpos+2,0);                              # position file for reading
+         $num = read(QA,$buffer,2,0);                     # read 2 bytes
+         die "unexpected size difference at pos $recpos"if $num != 2;
          $del = unpack("v",$buffer);                      # 0000 or FFFF so no endian differences
+
+         my $dofloat = 0;
+         if (($del == 0) and ($tsizer = $recsize)) {    # all is well record
+         } elsif ($del == 0) {                          # zero del but recsize wrong
+            $dofloat = 1;                               #  float along
+         } elsif ($del == 65535) {                      # all is well and s deleted record
+         } elsif (($del != 0) and ($del != 65535)) {    # second slot not a valid descriptor
+            $dofloat = 1;                               #  float along
+         }
+         if ($dofloat == 1) {                           # something very wrong, need to float ahead and find valid record header
+            my $gotrec = 0;
+            my $recpos_start = $recpos;
+            my $test_recpos;
+            if ($opt_float != 0) {
+               for ($i = 1; $i <= $opt_float; $i++) {
+                  $test_recpos = $recpos + $i;
+                  seek(QA,$test_recpos,0);                 # position file for reading
+                  $num = read(QA,$buffer,2,0);                  # read 2 bytes
+                  die "unexpected size difference at pos $test_recpos"if $num != 2;
+                  $tsizer = unpack("v",$buffer);                # Should be length
+                  seek(QA,$test_recpos+2,0);                              # position file for reading
+                  $num = read(QA,$buffer,2,0);                     # read 2 bytes
+                  die "unexpected size difference at pos $test_recpos"if $num != 2;
+                  $del = unpack("v",$buffer);                # Should be length
+                  if (($del == 65535) or (($del == 0) and ($tsizer == $recsize))) {
+                     warn "Skipping damaged record at $recpos pos [$i]";
+                     $crecpos += $i;
+                     $recpos += $i;
+                     $gotrec = 1;
+                     last;
+                  }
+               }
+               die "Length field not matched at pos $test_recpos start $recpos_start" if $gotrec == 0;
+            }
+         }
       }
-      die "Delete flag not 0000 or FFFF [$del] at position $recpos(decimal)" if ($del !=0) and ($del != 65535);
-      $recpos += 2;
+      if ($opt_checkdel == 1) {
+         die "Delete flag not 0000 or FFFF [$del] at position $recpos(decimal)" if ($del !=0) and ($del != 65535);
+      }
+      $recpos += 4;
       seek(QA,$recpos,0);                                 # re-position file for reading
       $num = read(QA,$cpydata_raw,$recsize);              # Remember raw data
-      die "unexpected size difference" if $num != $recsize;
+      die "unexpected size difference at pos $recpos" if $num != $recsize;
       seek(QA,$recpos,0);                                 # re-position file for reading
       $crecpos = $recpos;                                 # set current position
       $recpos += $recsize;                                # calculate position of next record
@@ -1110,7 +1157,7 @@ TOP: while ($recpos < $qa1size) {
 
    seek(QA,$crecpos,0);                                 # re-position file for reading
    $num = read(QA,$buffer,$recsize,0);                  # read data record
-   die "unexpected size difference - expected $recsize got $num l=$l $recpos" if $num != $recsize;
+   die "unexpected size difference - expected $recsize got $num l=$l $recpos at pos $recpos"if $num != $recsize;
    # record is now in $buffer
 
    $l++;                           # count logical records
@@ -1559,3 +1606,5 @@ exit;
 # 1.380000 : Detect another case of corrupted database file, first two 16 byte words are both 0 or neither empty.
 # 1.390000 : deliberately clobber the output file if present
 #          : Detect incorrect delete flag
+# 1.400000 : Add -nocheckdel option
+#            Add -float option to search for valid header.
