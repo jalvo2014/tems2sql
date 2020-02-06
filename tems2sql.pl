@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.41000;
+$gVersion = 1.42000;
 
 
 # no CPAN packages used
@@ -906,6 +906,7 @@ my $cpydata;          # column data
 my $cpydata_raw;      # raw column data
 my $lpre;             # output listing prefix
 my $del;              # deletion flag
+my $delstr;           # deletion flag string for little endian
 my $s;
 my @exwords;          # exclude words
 my $showkey;          # header attribute
@@ -1083,7 +1084,7 @@ TOP: while ($recpos + $recsize < $qa1size) {
          $num = read(QA,$buffer,2,0);                     # read 2 bytes
          die "unexpected size difference at pos $recpos"if $num != 2;
          my $tsizer = unpack("v",$buffer);                # Should be length
-         seek(QA,$recpos+2,0);                            # position file for reading
+         seek(QA,$recpos+3,0);                            # position file for reading
          $num = read(QA,$buffer,1,0);                     # read 1 bytes
          die "unexpected size difference at pos $recpos"if $num != 1;
          $del = unpack("c",$buffer);                      # 00 or FF so no endian differences
@@ -1107,10 +1108,10 @@ TOP: while ($recpos + $recsize < $qa1size) {
                   $num = read(QA,$buffer,2,0);                  # read 2 bytes
                   die "unexpected size difference at pos $test_recpos"if $num != 2;
                   $tsizer = unpack("v",$buffer);                # Should be length
-                  seek(QA,$test_recpos+2,0);                              # position file for reading
+                  seek(QA,$test_recpos+3,0);                              # position file for reading
                   $num = read(QA,$buffer,1,0);                     # read 1 bytes
-                  die "unexpected size difference at pos $test_recpos"if $num != 1;
-                  $del = unpack("c",$buffer);                # Should be length
+                  die "unexpected size difference at pos $recpos"if $num != 1;
+                  $del = unpack("c",$buffer);           # 00 or FF so no endian differences
                   if (($del == -1) or (($del == 0) and ($tsizer == $recsize))) {
                      warn "Skipping damaged record at $recpos pos [$i]";
                      $crecpos += $i;
@@ -1123,7 +1124,6 @@ TOP: while ($recpos + $recsize < $qa1size) {
             }
          }
       } else {
-$DB::single=2;
          seek(QA,$recpos+2,0);                            # position file for reading
          $num = read(QA,$buffer,2,0);                     # read 2 bytes
          die "unexpected size difference at pos $recpos"if $num != 2;
@@ -1653,3 +1653,4 @@ exit;
 # 1.400000 : Add -nocheckdel option
 #            Add -float option to search for valid header.
 # 1.410000 : Correct record header logic for littleendian and bigendian
+# 1.420000 : Correction 2 for record header logic for littleendian and bigendian
