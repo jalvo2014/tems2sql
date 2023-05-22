@@ -18,7 +18,7 @@
 # (with 1 registered patch, see perl -V for more detail)
 # $DB::single=2;   # remember debug breakpoint
 #
-$gVersion = 1.42000;
+$gVersion = 1.43000;
 
 
 # no CPAN packages used
@@ -96,6 +96,9 @@ my $opt_tr = 0;         # translate carriage return, line feed, tab into escapes
 my $opt_endian = 0;     # When 1 display endian status
 my $opt_utf8 = 0;       # When 1 produce utf8 report
 my $opt_checkdel = 1;
+my $opt_limit_nodelist = 0;
+my $opt_limit_nodelist_fn = "";
+my %hlimit_nodelist = ();
 my $debug_now = 0;
 my $curr_lstdate;
 
@@ -267,6 +270,15 @@ while (@ARGV) {
       }
       $opt_val_nickname = "default" if $opt_val_nickname eq "";
    }
+   elsif ($ARGV[0] eq "-limit_nodelist") {
+      shift(@ARGV);
+      $opt_limit_nodelist = 1;
+      if (!defined $ARGV[0]) {
+         die "limit_nodelist option with no following filename";
+      }
+      $opt_limit_nodelist_fn = $ARGV[0];
+      shift(@ARGV);
+   }
    elsif ($ARGV[0] eq "-f") {
       shift(@ARGV);
       $opt_fav = 1;
@@ -365,6 +377,15 @@ if (!defined $opt_fav) {$opt_fav=0;}                        # favorite (preferre
 if (!@opt_tc)  {@opt_tc=();}                                # set text columns to null
 if (!defined $opt_tlim)  {$opt_tlim=256;}                   # txt display column limit
 if (!defined $opt_utf8)  {$opt_utf8=0;}                     # no utf8 by default
+if ($opt_limit_nodelist == 1) {
+   open(LIM, "< $opt_limit_nodelist_fn") || die("Could not open $opt_limit_nodelist_fn\n");
+   my @lim_data = <LIM>;
+   close(LIM);
+   foreach $oneline (@lim_data) {
+      chop $oneline;
+      $hlimit_nodelist{$oneline} = 1;
+   }
+}
 
 my $got_qibclassid = 0;                             # when 1 a QIBCLASSID was found
 
@@ -1323,6 +1344,8 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
            }
          }
       }
+
+
       if ($col[$i] eq "LSTDATE"){                          # If checking LSTDATE record that fact
          if (defined $opt_future) {
             if ($cpydata gt $opt_future) {
@@ -1401,6 +1424,11 @@ COLUMN: for ($i = 0; $i <= $coli; $i++) {
       }
       else {                                        # INSERT SQL style
          $cpydata =~ s/\'/\'\'/g;                   # convert embedded single quotes into two single quotes
+         if ($opt_limit_nodelist == 1) {
+            if ($col[$i] eq "NODELIST"){
+               next TOP if !defined $hlimit_nodelist{$cpydata};
+            }
+         }
          $insql .= "\'" . $cpydata . "\'";          # place into SQL prototype
          if ($i < $coli) {
             $insql .= ", ";
@@ -1654,3 +1682,4 @@ exit;
 #            Add -float option to search for valid header.
 # 1.410000 : Correct record header logic for littleendian and bigendian
 # 1.420000 : Correction 2 for record header logic for littleendian and bigendian
+# 1.430000 : add -limit_nodelist to create selected TNODELST rows
